@@ -1,0 +1,31 @@
+-- AlterTable
+ALTER TABLE "Agent" ADD COLUMN     "pfPublicProfileId" TEXT,
+ADD COLUMN     "pfUserId" TEXT;
+
+-- AlterTable
+ALTER TABLE "OffPlanProperty" ADD COLUMN     "agentVideoUrl" TEXT,
+ADD COLUMN     "amenities" JSONB,
+ADD COLUMN     "amenitiesCover" TEXT,
+ADD COLUMN     "amenitiesSubtitle" TEXT,
+ADD COLUMN     "amenitiesTitle" TEXT,
+ADD COLUMN     "brochure" TEXT,
+ADD COLUMN     "brokerFee" TEXT,
+ADD COLUMN     "constructionProgress" DOUBLE PRECISION,
+ADD COLUMN     "coverPhoto" TEXT,
+ADD COLUMN     "dldPermitNumber" TEXT,
+ADD COLUMN     "dldQrCode" TEXT,
+ADD COLUMN     "exteriorMedia" TEXT[],
+ADD COLUMN     "floorPlans" JSONB,
+ADD COLUMN     "handoverDate" TIMESTAMP(3),
+ADD COLUMN     "interiorMedia" TEXT[],
+ADD COLUMN     "paymentPlan" JSONB,
+ADD COLUMN     "projectDescription" TEXT,
+ADD COLUMN     "projectStage" TEXT,
+ADD COLUMN     "projectTitle" TEXT,
+ADD COLUMN     "reference" TEXT,
+ADD COLUMN     "roiPotential" DOUBLE PRECISION,
+ADD COLUMN     "serviceCharges" DOUBLE PRECISION,
+ADD COLUMN     "shortDescription" TEXT,
+ADD COLUMN     "startingPrice" DOUBLE PRECISION,
+ADD COLUMN     "videoUrl" TEXT,
+ADD COLUMN     "virtualTourUrl" TEXT;

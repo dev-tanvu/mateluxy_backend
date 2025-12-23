@@ -1,0 +1,47 @@
+-- CreateTable
+CREATE TABLE "Property" (
+    "id" TEXT NOT NULL,
+    "category" TEXT NOT NULL,
+    "purpose" TEXT NOT NULL,
+    "clientName" TEXT NOT NULL,
+    "nationality" TEXT,
+    "phoneNumber" TEXT NOT NULL,
+    "emirate" TEXT,
+    "propertyType" TEXT,
+    "plotArea" DOUBLE PRECISION,
+    "area" DOUBLE PRECISION,
+    "bedrooms" INTEGER,
+    "kitchens" INTEGER,
+    "bathrooms" INTEGER,
+    "unitNumber" TEXT,
+    "ownershipStatus" TEXT,
+    "parkingSpaces" TEXT,
+    "address" TEXT,
+    "latitude" DOUBLE PRECISION,
+    "longitude" DOUBLE PRECISION,
+    "furnishingType" TEXT,
+    "price" DOUBLE PRECISION,
+    "rentalPeriod" TEXT,
+    "brokerFee" TEXT,
+    "numberOfCheques" TEXT,
+    "dldPermitNumber" TEXT,
+    "dldQrCode" TEXT,
+    "propertyTitle" TEXT,
+    "propertyDescription" TEXT,
+    "coverPhoto" TEXT,
+    "videoUrl" TEXT,
+    "mediaImages" TEXT[],
+    "reference" TEXT,
+    "availableFrom" TIMESTAMP(3),
+    "amenities" TEXT[],
+    "nocDocument" TEXT,
+    "assignedAgentId" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Property_pkey" PRIMARY KEY ("id")
+);
+
+-- AddForeignKey
+ALTER TABLE "Property" ADD CONSTRAINT "Property_assignedAgentId_fkey" FOREIGN KEY ("assignedAgentId") REFERENCES "Agent"("id") ON DELETE SET NULL ON UPDATE CASCADE;
