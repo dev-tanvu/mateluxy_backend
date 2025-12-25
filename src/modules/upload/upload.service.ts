@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
+import sharp from 'sharp';
+import axios from 'axios';
 
 @Injectable()
 export class UploadService {
@@ -49,14 +51,27 @@ export class UploadService {
 
         try {
             const fileExtension = file.originalname.split('.').pop()?.toLowerCase();
-            const key = `${uuidv4()}.${fileExtension}`;
+            let key = `${uuidv4()}.${fileExtension}`;
+            let buffer = file.buffer;
+            let contentType = file.mimetype;
+
+            // Optimize image if it's an image type
+            if (file.mimetype.startsWith('image/')) {
+                try {
+                    buffer = await this.optimizeImage(file.buffer);
+                    // Force jpg/content-type if converted, but keeping original ext for now mainly unless we force conversion to webp/jpg
+                    // strict resizing to 1920x1080 inside
+                } catch (optError) {
+                    this.logger.warn('Image optimization failed, uploading original:', optError);
+                }
+            }
 
             await this.s3Client.send(
                 new PutObjectCommand({
                     Bucket: this.bucketName,
                     Key: key,
-                    Body: file.buffer,
-                    ContentType: file.mimetype,
+                    Body: buffer,
+                    ContentType: contentType,
                     ACL: 'public-read', // Make image publicly accessible for Property Finder
                 }),
             );
@@ -67,6 +82,32 @@ export class UploadService {
         } catch (error) {
             this.logger.error('Failed to upload file to S3:', error);
             return null;
+        }
+    }
+
+    private async optimizeImage(buffer: Buffer): Promise<Buffer> {
+        return sharp(buffer)
+            .resize(1920, 1080, {
+                fit: 'inside',
+                withoutEnlargement: true,
+            })
+            .jpeg({ quality: 80, mozjpeg: true }) // Compress efficiently
+            .toBuffer();
+    }
+
+    // New method for on-the-fly optimization of external images
+    async getOptimizedImage(imageUrl: string, width: number = 300, quality: number = 20): Promise<Buffer> {
+        try {
+            const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+            return sharp(response.data)
+                .resize(width, null, { // Maintain aspect ratio based on width
+                    withoutEnlargement: true
+                })
+                .jpeg({ quality, mozjpeg: true }) // High compression for thumbnails
+                .toBuffer();
+        } catch (error) {
+            this.logger.error(`Failed to optimize external image: ${imageUrl}`, error);
+            throw new Error('Failed to fetch/optimize image');
         }
     }
 

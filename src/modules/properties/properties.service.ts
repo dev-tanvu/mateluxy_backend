@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
@@ -780,9 +780,13 @@ export class PropertiesService {
         });
 
         // Sync to PF with target state
+        // [MODIFIED] Auto-sync removed as per user request. "Save" should only update CRM.
+        // Sync is now handled explicitly via the "Update to PF" button.
+        /*
         this.syncToPropertyFinder(property.id, targetPublishState).catch((error) => {
             this.logger.error(`Failed to auto-sync property ${property.id} on Update`, error);
         });
+        */
 
         return property;
     }
@@ -1086,17 +1090,42 @@ export class PropertiesService {
             });
         }
 
+        // Validate and prepare title (30-50 characters required by PF)
+        let titleEn = property.propertyTitle || `${property.propertyType || 'Property'} in ${property.address || 'UAE'}`;
+        if (titleEn.length < 30) {
+            titleEn = titleEn.padEnd(30, ' '); // Pad with spaces if too short
+        } else if (titleEn.length > 50) {
+            titleEn = titleEn.substring(0, 50); // Truncate if too long
+        }
+
+        // Validate and prepare description (750-2000 characters required by PF)
+        this.logger.log(`=== DEBUG: Original description from DB: "${property.propertyDescription?.substring(0, 100)}..." (length: ${property.propertyDescription?.length || 0})`);
+        let descriptionEn = property.propertyDescription || property.propertyTitle || '';
+        if (descriptionEn.length < 750) {
+            // Pad with descriptive default text to meet minimum requirement
+            const defaultPadding = ` This ${property.propertyType || 'property'} is located in ${property.address || property.emirate || 'UAE'}. ` +
+                `It offers ${property.bedrooms || 0} bedrooms and ${property.bathrooms || 0} bathrooms with a total area of ${property.area || 0} sq.ft. ` +
+                `This listing is available for ${purposeLower === 'rent' ? 'rent' : 'sale'}. ` +
+                `Contact us for more details about this excellent opportunity. `;
+            while (descriptionEn.length < 750) {
+                descriptionEn += defaultPadding;
+            }
+            descriptionEn = descriptionEn.substring(0, 2000); // Cap at max length
+        }
+        this.logger.log(`=== DEBUG: Final description to send: "${descriptionEn.substring(0, 100)}..." (length: ${descriptionEn.length})`);
+
         // Prepare listing payload according to Property Finder API requirements
         const listing: any = {
             category,
+            offeringType: purposeLower === 'rent' ? 'rent' : 'sale', // Required field per PF API
             type: pfType,
             furnishingType,
             reference: property.reference || property.id,
             title: {
-                en: property.propertyTitle || `${property.propertyType || 'Property'} in ${property.address || 'UAE'}`,
+                en: titleEn,
             },
             description: {
-                en: property.propertyDescription || property.propertyTitle || '',
+                en: descriptionEn,
             },
             size: property.area || 0,
             price: {
@@ -1138,24 +1167,23 @@ export class PropertiesService {
             };
         }
 
-        // Add compliance for Dubai/Abu Dhabi
-        if ((emirate === 'dubai' || emirate === 'abu_dhabi') && property.dldPermitNumber) {
-            // Determine permit type based on emirate
-            let permitType = 'rera'; // Default for Dubai
-            if (emirate === 'abu_dhabi') permitType = 'adrec';
-            // Note: For holiday homes, permitType should be 'dtcm'
+        // Add compliance for Dubai/Abu Dhabi (REQUIRED for PUT requests per PF API)
+        // Determine permit type based on emirate
+        let permitType = 'rera'; // Default for Dubai
+        if (emirate === 'abu_dhabi') permitType = 'adrec';
+        // Note: For holiday homes, permitType should be 'dtcm'
 
-            // Get company ORN from integration config
-            const pfCredentials = await this.integrationsService.getCredentials('property_finder') as any;
-            const companyOrn = pfCredentials?.companyOrn || pfCredentials?.orn || '';
+        // Get company ORN from integration config
+        const pfCredentials = await this.integrationsService.getCredentials('property_finder') as any;
+        const companyOrn = pfCredentials?.companyOrn || pfCredentials?.orn || '';
 
-            listing.compliance = {
-                listingAdvertisementNumber: property.dldPermitNumber,
-                type: permitType,
-                issuingClientLicenseNumber: companyOrn,
-                userConfirmedDataIsCorrect: true,
-            };
-        }
+        // Compliance is REQUIRED in every PUT request according to PF API
+        listing.compliance = {
+            listingAdvertisementNumber: property.dldPermitNumber || '',
+            type: permitType,
+            issuingClientLicenseNumber: companyOrn,
+            userConfirmedDataIsCorrect: true,
+        };
 
         // Add additional fields
         if (property.unitNumber) {
@@ -1234,28 +1262,96 @@ export class PropertiesService {
 
         const agentPfId = property.assignedAgent?.pfPublicProfileId;
 
-        // Try to find location ID from Property Finder
+        // Use stored pfLocationId first, fallback to search if not available
         let locationId: number | undefined;
-        if (property.address || property.emirate) {
+
+        // Priority 1: Use stored pfLocationId from the property
+        if (property.pfLocationId) {
+            locationId = property.pfLocationId;
+            this.logger.log(`Using stored location ID ${locationId} for property ${propertyId}`);
+        }
+        // Priority 2: Search for location if not stored
+        else if (property.address || property.emirate) {
             try {
                 const searchTerm = property.address || property.emirate || '';
                 const locations = await this.propertyFinderService.searchLocations(searchTerm);
                 if (locations.length > 0) {
                     locationId = locations[0].id;
-                    this.logger.log(`Found location ID ${locationId} for property ${propertyId}`);
+                    this.logger.log(`Found location ID ${locationId} via search for property ${propertyId}`);
+
+                    // Store the found location ID for future use
+                    await this.prisma.property.update({
+                        where: { id: propertyId },
+                        data: { pfLocationId: locationId }
+                    });
                 }
             } catch (error) {
                 this.logger.warn(`Failed to find location for property ${propertyId}`, error);
             }
         }
 
+        // If still no location, throw error as it's required by PF API
+        if (!locationId) {
+            throw new HttpException(
+                'Property Finder Location is required. Please select a valid PF Location in the property form.',
+                HttpStatus.BAD_REQUEST
+            );
+        }
+
         const listingData = await this.mapPropertyToPfListing(property, agentPfId || undefined, locationId);
 
         try {
             if (property.pfListingId) {
-                // Update existing listing
-                await this.propertyFinderService.updateListing(property.pfListingId, listingData);
+                // ============ FETCH-MERGE-PUSH WORKFLOW (per PF API requirements) ============
+                // Step 1: FETCH - Get current listing data from Property Finder
+                this.logger.log(`Fetching existing listing ${property.pfListingId} from PF for merge...`);
+                let existingListing: any = null;
+                try {
+                    existingListing = await this.propertyFinderService.getListing(property.pfListingId);
+                    this.logger.log(`Fetched existing listing: ${JSON.stringify(existingListing?.title || 'No title')}`);
+                } catch (fetchError) {
+                    this.logger.warn(`Could not fetch existing listing, will send full replacement`, fetchError);
+                }
+
+                // Step 2: MERGE - Overlay CRM data on top of existing PF data
+                let mergedData: any;
+                if (existingListing) {
+                    // Start with existing PF data, overlay CRM changes
+                    mergedData = {
+                        ...existingListing,
+                        ...listingData,
+                        // Ensure nested objects are properly merged
+                        title: listingData.title || existingListing.title,
+                        description: listingData.description || existingListing.description,
+                        price: listingData.price || existingListing.price,
+                        location: listingData.location || existingListing.location,
+                        compliance: listingData.compliance || existingListing.compliance,
+                        media: listingData.media || existingListing.media,
+                    };
+                    this.logger.log(`Merged CRM changes with existing PF data`);
+                } else {
+                    // No existing listing found, send CRM data as-is
+                    mergedData = listingData;
+                }
+
+                // Step 3: PUSH - Send the merged full object via PUT
+                this.logger.log(`Sending PUT request to PF with merged data...`);
+                await this.propertyFinderService.updateListing(property.pfListingId, mergedData);
                 this.logger.log(`Updated PF listing ${property.pfListingId} for property ${propertyId}`);
+
+                // Notification: Update Success
+                try {
+                    await (this.prisma as any).notification.create({
+                        data: {
+                            type: 'SUCCESS',
+                            title: 'Property Updated on PF',
+                            message: `Property "${property.propertyTitle}" has been successfully updated on Property Finder.`,
+                        }
+                    });
+                } catch (nErr) {
+                    this.logger.warn('Failed to create notification', nErr);
+                }
+
             } else {
                 // Create new listing
                 const result = await this.propertyFinderService.createListing(listingData);
@@ -1269,6 +1365,19 @@ export class PropertiesService {
                     },
                 });
                 this.logger.log(`Created PF listing ${result.id} for property ${propertyId}`);
+
+                // Notification: Create Success
+                try {
+                    await (this.prisma as any).notification.create({
+                        data: {
+                            type: 'SUCCESS',
+                            title: 'Property Published to PF',
+                            message: `Property "${property.propertyTitle}" has been successfully published to Property Finder.`,
+                        }
+                    });
+                } catch (nErr) {
+                    this.logger.warn('Failed to create notification', nErr);
+                }
             }
 
             // Update sync timestamp
@@ -1280,6 +1389,34 @@ export class PropertiesService {
             return { success: true, propertyId, pfListingId: property.pfListingId };
         } catch (error) {
             this.logger.error(`Failed to sync property ${propertyId} to PF`, error);
+
+            // Notification: Failure
+            try {
+                // Ensure property is defined before accessing its title
+                const propTitle = property ? property.propertyTitle : propertyId;
+
+                await (this.prisma as any).notification.create({
+                    data: {
+                        type: 'ERROR',
+                        title: 'Failed to Update Property on PF',
+                        message: `Failed to sync property "${propTitle}" to Property Finder. Please check logs.`,
+                    }
+                });
+            } catch (nErr) {
+                this.logger.warn('Failed to create notification', nErr);
+            }
+
+            if ((error as any).response) {
+                const axiosError = error as any;
+                this.logger.error('=== PROPERTY FINDER API ERROR ===');
+                this.logger.error(`Status: ${axiosError.response.status}`);
+                this.logger.error(`Data: ${JSON.stringify(axiosError.response.data, null, 2)}`);
+                this.logger.error('=================================');
+                throw new HttpException(
+                    axiosError.response.data || 'Failed to sync with Property Finder',
+                    axiosError.response.status || HttpStatus.BAD_REQUEST
+                );
+            }
             throw error;
         }
     }

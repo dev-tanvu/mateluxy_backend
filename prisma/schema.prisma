@@ -273,6 +273,29 @@ model Property {
   @@index([isActive, status])
   @@index([price])
   @@index([createdAt])
+
+}
+
+model PropertyDraft {
+  id                String    @id @default(cuid())
+  
+  // The draft content is stored as flexible JSON to handle partial or evolving schemas
+  data              Json
+  
+  // Links
+  originalPropertyId String?  // Check if this draft edits an existing property (nullable for new property drafts)
+  
+  // Creator
+  userId            String?
+  // Note: We're not making userId mandatory or related to User model strictly here if anonymous drafts allowed, 
+  // but typically it should be. The user asked for "show them all in the drafts tab", implying a global or user list.
+  // Given current User model, let's keep it simple. If we want relation:
+  // user              User      @relation(fields: [userId], references: [id])
+  // But User model needs opposite relation field. To minimize impact on User model, we'll keep it as loose string or add relation if strictly needed.
+  // Requirement: "show them all in the drafts tab".
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 model Lead {
