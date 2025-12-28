@@ -10,6 +10,8 @@ import {
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { NocService } from './noc.service';
 import { CreateNocDto } from './dto/create-noc.dto';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Controller('noc')
 export class NocController {
@@ -21,24 +23,41 @@ export class NocController {
         @Body() body: any,
         @UploadedFiles() files: Array<Express.Multer.File>,
     ) {
-        // Parse the body - formData "owners" will likely be a JSON string if sent as a complex array
-        // OR it might be individual fields if we iterate.
-        // Let's assume the frontend sends 'owners' as a JSON string for simplicity, 
-        // OR we map generic fields. 
-        // Given React Hook Form / standard implementations, JSON string for complex nested arrays is safest with FormData.
+        // Logging for debugging
+        console.log('NOC Create Body:', JSON.stringify(body, null, 2));
+        console.log('NOC Create Files:', files?.map(f => f.fieldname));
 
+        // 1. Parsing Owners
         let owners = [];
         if (typeof body.owners === 'string') {
             try {
                 owners = JSON.parse(body.owners);
             } catch (e) {
-                // Handle parse error or fallback
+                console.error('Error parsing owners JSON:', e);
                 owners = [];
             }
+        } else if (Array.isArray(body.owners)) {
+            owners = body.owners;
         } else {
-            owners = body.owners || [];
+            console.warn('Body owners is neither string nor array:', typeof body.owners);
+            owners = [];
         }
 
+        console.log('NOC Create Owners Parsed:', JSON.stringify(owners, null, 2));
+
+        // 2. Safe Number Parsing Helpers
+        const safeFloat = (val: any) => {
+            if (val === undefined || val === null || val === '') return undefined;
+            const parsed = parseFloat(val);
+            return isNaN(parsed) ? undefined : parsed;
+        };
+        const safeInt = (val: any) => {
+            if (val === undefined || val === null || val === '') return undefined;
+            const parsed = parseInt(val);
+            return isNaN(parsed) ? undefined : parsed;
+        };
+
+        // 3. Construct DTO
         const createNocDto: CreateNocDto = {
             owners: owners,
 
@@ -47,21 +66,34 @@ export class NocController {
             buildingProjectName: body.buildingProjectName,
             community: body.community,
             streetName: body.streetName,
-            buildUpArea: body.buildUpArea ? parseFloat(body.buildUpArea) : undefined,
-            plotArea: body.plotArea ? parseFloat(body.plotArea) : undefined,
-            bedrooms: body.bedrooms ? parseInt(body.bedrooms) : undefined,
-            bathrooms: body.bathrooms ? parseInt(body.bathrooms) : undefined,
-            rentalAmount: body.rentalAmount ? parseFloat(body.rentalAmount) : undefined,
-            saleAmount: body.saleAmount ? parseFloat(body.saleAmount) : undefined,
+            buildUpArea: safeFloat(body.buildUpArea),
+            plotArea: safeFloat(body.plotArea),
+            bedrooms: safeInt(body.bedrooms),
+            bathrooms: safeInt(body.bathrooms),
+            rentalAmount: safeFloat(body.rentalAmount),
+            saleAmount: safeFloat(body.saleAmount),
             parking: body.parking,
 
             // Terms
             agreementType: body.agreementType,
-            periodMonths: body.periodMonths ? parseInt(body.periodMonths) : undefined,
+            periodMonths: safeInt(body.periodMonths),
             agreementDate: body.agreementDate,
         };
 
-        return this.nocService.create(createNocDto, files);
+        // 4. Call Service
+        try {
+            return await this.nocService.create(createNocDto, files);
+        } catch (error) {
+            console.error('Error creating NOC in controller:', error);
+            const logPath = path.join(process.cwd(), 'noc_error.log');
+            const errorMessage = error instanceof Error ? error.stack : JSON.stringify(error);
+            fs.writeFileSync(logPath, `${new Date().toISOString()} - ERROR: ${errorMessage}\nDTO: ${JSON.stringify(createNocDto)}\n\n`);
+
+            if (error instanceof Error) {
+                console.error(error.stack);
+            }
+            throw error;
+        }
     }
 
     @Get()

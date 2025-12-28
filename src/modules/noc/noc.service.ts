@@ -14,6 +14,12 @@ export class NocService {
         private uploadService: UploadService,
     ) { }
 
+    private safeDate(dateStr: string | null | undefined): Date | null {
+        if (!dateStr || dateStr.trim() === '') return null;
+        const date = new Date(dateStr);
+        return isNaN(date.getTime()) ? null : date;
+    }
+
     async create(
         createNocDto: CreateNocDto,
         files: Array<Express.Multer.File> = [],
@@ -39,12 +45,12 @@ export class NocService {
             ownersData.push({
                 name: ownerDto.name,
                 emiratesId: ownerDto.emiratesId,
-                issueDate: ownerDto.issueDate ? new Date(ownerDto.issueDate) : null,
-                expiryDate: ownerDto.expiryDate ? new Date(ownerDto.expiryDate) : null,
+                issueDate: this.safeDate(ownerDto.issueDate),
+                expiryDate: this.safeDate(ownerDto.expiryDate),
                 countryCode: ownerDto.countryCode,
                 phone: ownerDto.phone,
                 signatureUrl: signatureUrl,
-                signatureDate: ownerDto.signatureDate ? new Date(ownerDto.signatureDate) : null,
+                signatureDate: this.safeDate(ownerDto.signatureDate),
             });
         }
 
@@ -72,7 +78,7 @@ export class NocService {
                 // Terms
                 agreementType: createNocDto.agreementType,
                 periodMonths: createNocDto.periodMonths,
-                agreementDate: createNocDto.agreementDate ? new Date(createNocDto.agreementDate) : null,
+                agreementDate: this.safeDate(createNocDto.agreementDate),
             },
             include: {
                 owners: true,

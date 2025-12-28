@@ -168,6 +168,11 @@ export class AiService {
                 description = description.substring(0, settings.maxCharacters - 3) + '...';
             }
 
+            // Append standard Company Section
+            const companySection = `\n\nOUR COMPANY:\n\nMateluxy – your friendly gateway to exceptional real estate experiences in Dubai! \nAs one of the top property agencies in the city, we’re on a mission to bring you high-quality homes for sale and lease, tailored to your unique preferences. But we’re more than just a property agency – Mateluxy is your partner in comprehensive property management services. Whether you’re searching for your dream home or aiming for a smart investment, we’ve got you covered!\n\nMATELUXY REAL ESTATE BROKER L.L.C\n601 Bay Square 13,`;
+
+            description += companySection;
+
             this.logger.log('Final description length: ' + description.length);
             return description;
         } catch (error: any) {
@@ -269,16 +274,30 @@ Write a compelling, SEO-optimized property description for a real estate listing
 ${propertyInfo}
 
 Requirements:
-1. The description MUST be between ${settings.minCharacters} and ${settings.maxCharacters} characters
-2. Use professional real estate language
-3. Highlight key features and benefits
-4. Include location advantages if applicable
-5. Make it engaging and persuasive for potential buyers/renters
-6. Do NOT include any markdown formatting, headers, or bullet points - write in flowing paragraphs
-7. Do NOT include placeholder text or brackets
-8. Focus on lifestyle benefits and the value proposition
-9. Include a call to action at the end
-${trainingExamples.length > 0 ? '10. Match the writing style from the examples provided above' : ''}
+1. **Structure**: Organize the description into the following sections with plain text headers (followed by a colon):
+   - Overview: A compelling introductory paragraph about the property, its location, and lifestyle.
+   - Property Features: A list of key features.
+   - Amenities: A list of amenities.
+
+2. **Conditional Logic**:
+   - If the "Amenities" list is empty or not provided, **completely skip** the "Amenities" section.
+   - Only list features and amenities that are explicitly provided in the details. Do NOT invent or assume features.
+
+3. **Data Privacy**: 
+   - Strict rule: Do NOT include any client details (name, phone, nationality), owner information, or internal notes.
+
+4. **Formatting Rules (CRITICAL)**:
+   - **NO Bolding**: Do NOT use markdown bolding (e.g., **text** or __text__). Use plain text only.
+   - **NO Special Characters**: Do NOT use characters like *, #, %, $, @, or emojis.
+   - **Bullets**: Use ONLY the hyphen character "-" for bullet points. Do not use asterisks or dots.
+   - **Headers**: Write headers in plain text with a colon (e.g. "Overview:", "Property Features:"). Do not use H1/H2 markdown (#).
+
+5. **Length**: The total length must be between ${settings.minCharacters} and ${settings.maxCharacters} characters.
+
+6. **Exclusions**: 
+   - Do NOT include an "About Us", "Our Company", or generic company footer (this is added automatically).
+
+${trainingExamples.length > 0 ? '7. Match the writing style from the examples provided above.' : ''}
 
 Write the description now:`;
     }
