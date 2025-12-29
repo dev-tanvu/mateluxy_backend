@@ -81,6 +81,15 @@ export class UsersController {
         return this.usersService.findById(user.id);
     }
 
+    @UseGuards(JwtAuthGuard)
+    @Patch('me/menu-order')
+    async updateMenuOrder(
+        @GetUser() user: any,
+        @Body() body: { menuOrder: string[] },
+    ) {
+        return this.usersService.updateMenuOrder(user.id, body.menuOrder);
+    }
+
     @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
     @Roles(Role.ADMIN)
     @Permissions('Users')

@@ -201,6 +201,17 @@ export class UsersService {
         });
     }
 
+    async updateMenuOrder(userId: string, menuOrder: string[]) {
+        return this.prisma.user.update({
+            where: { id: userId },
+            data: { sidebarMenuOrder: menuOrder },
+            select: {
+                id: true,
+                sidebarMenuOrder: true,
+            },
+        });
+    }
+
     async findDeviceLock(userId: string, deviceId: string) {
         return this.prisma.otpDeviceLock.findUnique({
             where: {

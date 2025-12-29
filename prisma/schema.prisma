@@ -16,6 +16,7 @@ model User {
   avatarUrl    String?
   role         Role
   permissions  String[]
+  sidebarMenuOrder String[]  // Custom sidebar menu order (array of menu item hrefs)
   otp          String?
   otpExpiresAt DateTime?
   createdAt    DateTime  @default(now())
