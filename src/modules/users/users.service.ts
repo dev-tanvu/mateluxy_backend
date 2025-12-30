@@ -212,6 +212,37 @@ export class UsersService {
         });
     }
 
+    async updateNotificationSettings(
+        userId: string,
+        data: {
+            notificationSoundStart?: number;
+            notificationSoundEnd?: number;
+            useCustomNotificationSound?: boolean;
+        },
+        notificationSoundUrl?: string
+    ) {
+        const updateData: any = { ...data };
+        if (notificationSoundUrl) {
+            updateData.notificationSoundUrl = notificationSoundUrl;
+        }
+
+        // Clean up old file if replacing? 
+        // For simplicity, we won't delete old file immediately unless we want to keep storage clean.
+        // But we should probably check if user had an old file.
+
+        return this.prisma.user.update({
+            where: { id: userId },
+            data: updateData,
+            select: {
+                id: true,
+                notificationSoundUrl: true,
+                notificationSoundStart: true,
+                notificationSoundEnd: true,
+                useCustomNotificationSound: true,
+            } as any
+        });
+    }
+
     async findDeviceLock(userId: string, deviceId: string) {
         return this.prisma.otpDeviceLock.findUnique({
             where: {

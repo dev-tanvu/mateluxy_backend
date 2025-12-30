@@ -82,12 +82,37 @@ export class UsersController {
     }
 
     @UseGuards(JwtAuthGuard)
-    @Patch('me/menu-order')
     async updateMenuOrder(
         @GetUser() user: any,
         @Body() body: { menuOrder: string[] },
     ) {
         return this.usersService.updateMenuOrder(user.id, body.menuOrder);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Patch('me/notification-settings')
+    @UseInterceptors(FileInterceptor('notificationSound'))
+    async updateNotificationSettings(
+        @GetUser() user: any,
+        @Body() body: any,
+        @UploadedFile() file?: Express.Multer.File,
+    ) {
+        let notificationSoundUrl: string | undefined;
+        if (file) {
+            notificationSoundUrl = await this.uploadService.uploadFile(file) || undefined;
+        } else if (body.notificationSoundUrl) {
+            notificationSoundUrl = body.notificationSoundUrl;
+        }
+
+        // Parse numeric/boolean fields from FormData (they come as strings)
+        const data: any = {};
+        if (body.notificationSoundStart !== undefined) data.notificationSoundStart = parseFloat(body.notificationSoundStart);
+        if (body.notificationSoundEnd !== undefined) data.notificationSoundEnd = parseFloat(body.notificationSoundEnd);
+        if (body.useCustomNotificationSound !== undefined) {
+            data.useCustomNotificationSound = String(body.useCustomNotificationSound) === 'true';
+        }
+
+        return this.usersService.updateNotificationSettings(user.id, data, notificationSoundUrl);
     }
 
     @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)

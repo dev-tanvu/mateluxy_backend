@@ -25,6 +25,12 @@ model User {
   refreshToken String?
   otpDeviceLocks OtpDeviceLock[]
   activityLogs ActivityLog[]
+
+  // Notification Settings
+  notificationSoundUrl        String?
+  notificationSoundStart      Float?   @default(0)
+  notificationSoundEnd        Float?
+  useCustomNotificationSound  Boolean  @default(false)
 }
 
 model OtpDeviceLock {
