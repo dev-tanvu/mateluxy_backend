@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UploadService } from '../upload/upload.service';
 import { FileManagerService } from '../file-manager/file-manager.service';
@@ -81,10 +81,21 @@ export class NocService {
                 agreementType: createNocDto.agreementType,
                 periodMonths: createNocDto.periodMonths,
                 agreementDate: this.safeDate(createNocDto.agreementDate),
+
+                // Contact & Location
+                clientPhone: createNocDto.clientPhone,
+                location: createNocDto.location,
+                latitude: createNocDto.latitude,
+                longitude: createNocDto.longitude,
             },
             include: {
                 owners: true,
             },
+        }).catch(error => {
+            if (error.code === 'P2002' && error.meta?.target?.includes('clientPhone')) {
+                throw new ConflictException('An NOC with this phone number already exists.');
+            }
+            throw error;
         });
 
         // Generate PDF and upload to S3

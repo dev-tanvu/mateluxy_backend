@@ -108,4 +108,18 @@ export class IntegrationsService {
             data: { isRead: true }
         });
     }
+
+    async createTestNotification() {
+        const prisma = this.prisma as any;
+        if (!prisma.notification) return;
+
+        return prisma.notification.create({
+            data: {
+                title: 'Test Notification',
+                message: 'This is a test to verify your sound settings.',
+                type: 'SUCCESS', // or INFO
+                isRead: false
+            }
+        });
+    }
 }

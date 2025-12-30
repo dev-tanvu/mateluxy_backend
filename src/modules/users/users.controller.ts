@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards, UseInterceptors, UploadedFile, Query, Delete, Patch, Param, Ip } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, UseInterceptors, UploadedFile, Query, Delete, Patch, Param } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -11,6 +11,7 @@ import { Permissions } from '../../common/decorators/permissions.decorator';
 import { Role } from '@prisma/client';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { UploadService } from '../upload/upload.service';
+import { RealIp } from '../../common/decorators/real-ip.decorator';
 
 @Controller('users')
 export class UsersController {
@@ -28,7 +29,7 @@ export class UsersController {
         @Body() createUserDto: CreateUserDto,
         @GetUser() user: any,
         @UploadedFile() file?: Express.Multer.File,
-        @Ip() ip?: string,
+        @RealIp() ip?: string,
     ) {
         try {
             console.log('File received:', file ? `Yes - ${file.originalname}` : 'No file');
@@ -119,7 +120,7 @@ export class UsersController {
     @Roles(Role.ADMIN)
     @Permissions('Users')
     @Delete(':id')
-    remove(@Param('id') id: string, @GetUser() user: any, @Ip() ip?: string) {
+    remove(@Param('id') id: string, @GetUser() user: any, @RealIp() ip?: string) {
         return this.usersService.remove(id, user?.id, ip);
     }
 
@@ -133,7 +134,7 @@ export class UsersController {
         @Body() updateUserDto: UpdateUserDto,
         @GetUser() user: any,
         @UploadedFile() file?: Express.Multer.File,
-        @Ip() ip?: string,
+        @RealIp() ip?: string,
     ) {
         let avatarUrl: string | undefined;
         if (file) {

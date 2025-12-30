@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards, UseInterceptors, UploadedFiles, Query, Delete, Patch, Param, Ip } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, UseInterceptors, UploadedFiles, Query, Delete, Patch, Param } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { AgentsService } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
@@ -9,6 +9,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { UploadService } from '../upload/upload.service';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { RealIp } from '../../common/decorators/real-ip.decorator';
 
 @Controller('agents')
 export class AgentsController {
@@ -21,7 +22,7 @@ export class AgentsController {
     @Roles(Role.ADMIN)
     @Post('sync')
     @Post('sync')
-    syncFromPropertyFinder(@GetUser() user?: any, @Ip() ip?: string) {
+    syncFromPropertyFinder(@GetUser() user?: any, @RealIp() ip?: string) {
         return this.agentsService.syncFromPropertyFinder(user?.id, ip);
     }
 
@@ -36,7 +37,7 @@ export class AgentsController {
         @Body() createAgentDto: CreateAgentDto,
         @UploadedFiles() files?: { photo?: Express.Multer.File[], vcard?: Express.Multer.File[], licenseDocument?: Express.Multer.File[] },
         @GetUser() user?: any,
-        @Ip() ip?: string,
+        @RealIp() ip?: string,
     ) {
         let photoUrl: string | undefined;
         let vcardUrl: string | undefined;
@@ -126,7 +127,7 @@ export class AgentsController {
         @Body() updateAgentDto: UpdateAgentDto,
         @UploadedFiles() files?: { photo?: Express.Multer.File[], vcard?: Express.Multer.File[], licenseDocument?: Express.Multer.File[] },
         @GetUser() user?: any,
-        @Ip() ip?: string,
+        @RealIp() ip?: string,
     ) {
         let photoUrl: string | undefined;
         let vcardUrl: string | undefined;
@@ -188,28 +189,28 @@ export class AgentsController {
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(Role.ADMIN)
     @Delete(':id')
-    remove(@Param('id') id: string, @GetUser() user?: any, @Ip() ip?: string) {
+    remove(@Param('id') id: string, @GetUser() user?: any, @RealIp() ip?: string) {
         return this.agentsService.remove(id, user?.id, ip);
     }
 
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(Role.ADMIN)
     @Patch(':id/activate')
-    activate(@Param('id') id: string, @GetUser() user?: any, @Ip() ip?: string) {
+    activate(@Param('id') id: string, @GetUser() user?: any, @RealIp() ip?: string) {
         return this.agentsService.activate(id, user?.id, ip);
     }
 
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(Role.ADMIN)
     @Patch(':id/deactivate')
-    deactivate(@Param('id') id: string, @GetUser() user?: any, @Ip() ip?: string) {
+    deactivate(@Param('id') id: string, @GetUser() user?: any, @RealIp() ip?: string) {
         return this.agentsService.deactivate(id, user?.id, ip);
     }
 
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(Role.ADMIN)
     @Post(':id/submit-verification')
-    submitForVerification(@Param('id') id: string, @GetUser() user?: any, @Ip() ip?: string) {
+    submitForVerification(@Param('id') id: string, @GetUser() user?: any, @RealIp() ip?: string) {
         return this.agentsService.submitForVerification(id, user?.id, ip);
     }
 }

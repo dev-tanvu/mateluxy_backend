@@ -23,6 +23,7 @@ import { DraftsModule } from './modules/properties/drafts/drafts.module';
 import { NocModule } from './modules/noc/noc.module';
 import { AiModule } from './modules/ai/ai.module';
 import { FileManagerModule } from './modules/file-manager/file-manager.module';
+import { PasswordsModule } from './modules/passwords/passwords.module';
 
 
 @Module({
@@ -51,6 +52,7 @@ import { FileManagerModule } from './modules/file-manager/file-manager.module';
     NocModule,
     AiModule,
     FileManagerModule,
+    PasswordsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Delete, UseInterceptors, UploadedFiles, Patch, Query, UseGuards, Ip } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, UseInterceptors, UploadedFiles, Patch, Query, UseGuards } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { PropertiesService } from './properties.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
@@ -6,6 +6,7 @@ import { UpdatePropertyDto } from './dto/update-property.dto';
 import { UploadService } from '../upload/upload.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { RealIp } from '../../common/decorators/real-ip.decorator';
 
 @Controller('properties')
 export class PropertiesController {
@@ -126,7 +127,7 @@ export class PropertiesController {
             titleDeed?: Express.Multer.File[];
         },
         @GetUser() user: any,
-        @Ip() ip: string,
+        @RealIp() ip: string,
     ) {
         const fileUrls: {
             coverPhoto?: string;
@@ -200,7 +201,7 @@ export class PropertiesController {
             titleDeed?: Express.Multer.File[];
         },
         @GetUser() user: any,
-        @Ip() ip: string,
+        @RealIp() ip: string,
     ) {
         const fileUrls: {
             coverPhoto?: string;
@@ -253,7 +254,7 @@ export class PropertiesController {
         @Param('id') id: string,
         @Body('status') status: 'AVAILABLE' | 'SOLD' | 'RENTED',
         @GetUser() user: any,
-        @Ip() ip: string
+        @RealIp() ip: string
     ) {
         return this.propertiesService.updateStatus(id, status, user?.id, ip);
     }
@@ -264,21 +265,21 @@ export class PropertiesController {
         @Param('id') id: string,
         @Body('isActive') isActive: boolean,
         @GetUser() user: any,
-        @Ip() ip: string
+        @RealIp() ip: string
     ) {
         return this.propertiesService.toggleActive(id, isActive, user?.id, ip);
     }
 
     @Delete(':id')
     @UseGuards(JwtAuthGuard)
-    delete(@Param('id') id: string, @GetUser() user: any, @Ip() ip: string) {
+    delete(@Param('id') id: string, @GetUser() user: any, @RealIp() ip: string) {
         return this.propertiesService.delete(id, user?.id, ip);
     }
 
     // ============ PROPERTY FINDER SYNC ============
 
     @Post('sync-to-pf')
-    syncFromPropertyFinder(@GetUser() user?: any, @Ip() ip?: string) {
+    syncFromPropertyFinder(@GetUser() user?: any, @RealIp() ip?: string) {
         return this.propertiesService.syncFromPropertyFinder(user?.id, ip);
     }
 

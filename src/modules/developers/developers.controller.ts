@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards, UseInterceptors, UploadedFiles, Query, Delete, Patch, Param, Ip } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, UseInterceptors, UploadedFiles, Query, Delete, Patch, Param } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { DevelopersService } from './developers.service';
 import { CreateDeveloperDto } from './dto/create-developer.dto';
@@ -9,6 +9,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { UploadService } from '../upload/upload.service';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { RealIp } from '../../common/decorators/real-ip.decorator';
 
 @Controller('developers')
 export class DevelopersController {
@@ -28,7 +29,7 @@ export class DevelopersController {
         @Body() createDeveloperDto: CreateDeveloperDto,
         @UploadedFiles() files?: { logo?: Express.Multer.File[], salesManagerPhoto?: Express.Multer.File[] },
         @GetUser() user?: any,
-        @Ip() ip?: string,
+        @RealIp() ip?: string,
     ) {
         let logoUrl: string | undefined;
         let salesManagerPhotoUrl: string | undefined;
@@ -86,7 +87,7 @@ export class DevelopersController {
         @Body() updateDeveloperDto: UpdateDeveloperDto,
         @UploadedFiles() files?: { logo?: Express.Multer.File[], salesManagerPhoto?: Express.Multer.File[] },
         @GetUser() user?: any,
-        @Ip() ip?: string,
+        @RealIp() ip?: string,
     ) {
         let logoUrl: string | undefined;
         let salesManagerPhotoUrl: string | undefined;
@@ -131,7 +132,7 @@ export class DevelopersController {
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(Role.ADMIN)
     @Delete(':id')
-    remove(@Param('id') id: string, @GetUser() user?: any, @Ip() ip?: string) {
+    remove(@Param('id') id: string, @GetUser() user?: any, @RealIp() ip?: string) {
         return this.developersService.remove(id, user?.id, ip);
     }
 }

@@ -447,6 +447,12 @@ model Noc {
   agreementType       String?   // 'exclusive' | 'non-exclusive'
   periodMonths        Int?      // 1, 2, 3, or 6
   agreementDate       DateTime?
+
+  // Contact Info & Location
+  clientPhone         String?   @unique // Unique phone number per NOC
+  location            String?   // Google Maps Address
+  latitude            Float?
+  longitude           Float?
   
   // Generated PDF - stored in S3
   pdfUrl              String?
@@ -529,6 +535,18 @@ model File {
   folderId    String?
   folder      Folder?  @relation(fields: [folderId], references: [id], onDelete: Cascade)
   
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PasswordEntry {
+  id          String   @id @default(cuid())
+  title       String
+  username    String   // Encrypted
+  password    String   // Encrypted
+  accessIds   String[] // Array of User IDs who have access
+  note        String?
+  createdBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

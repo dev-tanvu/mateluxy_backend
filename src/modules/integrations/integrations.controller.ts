@@ -21,6 +21,11 @@ export class IntegrationsController {
         return this.integrationsService.markNotificationsRead();
     }
 
+    @Post('notifications/test')
+    createTest() {
+        return this.integrationsService.createTestNotification();
+    }
+
     @Post(':provider')
     update(@Param('provider') provider: string, @Body() body: { isEnabled?: boolean; credentials?: any }) {
         return this.integrationsService.update(provider, body);

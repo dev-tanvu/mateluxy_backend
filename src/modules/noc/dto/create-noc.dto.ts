@@ -95,4 +95,21 @@ export class CreateNocDto {
     @IsOptional()
     @IsString()
     agreementDate?: string;
+
+    // Contact & Location
+    @IsOptional()
+    @IsString()
+    clientPhone?: string;
+
+    @IsOptional()
+    @IsString()
+    location?: string;
+
+    @IsOptional()
+    @IsNumber()
+    latitude?: number;
+
+    @IsOptional()
+    @IsNumber()
+    longitude?: number;
 }
