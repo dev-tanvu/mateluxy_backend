@@ -78,6 +78,12 @@ export class NocController {
             agreementType: body.agreementType,
             periodMonths: safeInt(body.periodMonths),
             agreementDate: body.agreementDate,
+
+            // Contact & Location
+            clientPhone: body.clientPhone,
+            location: body.location,
+            latitude: safeFloat(body.latitude),
+            longitude: safeFloat(body.longitude),
         };
 
         // 4. Call Service
