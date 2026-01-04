@@ -4,6 +4,7 @@ import { IntegrationsService } from '../integrations/integrations.service';
 import { PropertiesService } from '../properties/properties.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AgentsService } from '../agents/agents.service';
+import { FileManagerService } from '../file-manager/file-manager.service';
 
 @Injectable()
 export class SyncSchedulerService {
@@ -14,6 +15,7 @@ export class SyncSchedulerService {
         private propertiesService: PropertiesService,
         private prisma: PrismaService,
         private agentsService: AgentsService,
+        private fileManagerService: FileManagerService,
     ) { }
 
     @Cron(CronExpression.EVERY_MINUTE)
@@ -55,6 +57,18 @@ export class SyncSchedulerService {
         // Execution: On the hour
         if (minute === 0 && hour % 6 === 0) {
             await this.runSync();
+        }
+    }
+
+    @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+    async handleCleanupCron() {
+        this.logger.log('Starting Scheduled File Cleanup & Size Sync...');
+        try {
+            await this.fileManagerService.cleanupDeletedItems();
+            await this.fileManagerService.syncFileSizes();
+            this.logger.log('Scheduled File Cleanup & Size Sync completed.');
+        } catch (error) {
+            this.logger.error('Scheduled File Cleanup & Size Sync failed', error);
         }
     }
 

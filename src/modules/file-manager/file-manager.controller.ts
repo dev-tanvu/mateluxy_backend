@@ -65,6 +65,36 @@ export class FileManagerController {
         return this.fileManagerService.restoreFolder(id);
     }
 
+    @Post('folder/:id/rename')
+    async renameFolder(@Param('id') id: string, @Body('name') name: string) {
+        return this.fileManagerService.renameFolder(id, name);
+    }
+
+    @Post('file/:id/rename')
+    async renameFile(@Param('id') id: string, @Body('name') name: string) {
+        return this.fileManagerService.renameFile(id, name);
+    }
+
+    @Post('folder/:id/move')
+    async moveFolder(@Param('id') id: string, @Body('targetParentId') targetParentId: string | null) {
+        return this.fileManagerService.moveFolder(id, targetParentId);
+    }
+
+    @Post('file/:id/move')
+    async moveFile(@Param('id') id: string, @Body('targetFolderId') targetFolderId: string | null) {
+        return this.fileManagerService.moveFile(id, targetFolderId);
+    }
+
+    @Post('folder/:id/copy')
+    async copyFolder(@Param('id') id: string, @Body('targetParentId') targetParentId: string | null) {
+        return this.fileManagerService.copyFolder(id, targetParentId);
+    }
+
+    @Post('file/:id/copy')
+    async copyFile(@Param('id') id: string, @Body('targetFolderId') targetFolderId: string | null) {
+        return this.fileManagerService.copyFile(id, targetFolderId);
+    }
+
     @Delete('folder/:id')
     async deleteFolder(@Param('id') id: string) {
         return this.fileManagerService.deleteFolder(id);
@@ -73,5 +103,20 @@ export class FileManagerController {
     @Delete('file/:id')
     async deleteFile(@Param('id') id: string) {
         return this.fileManagerService.deleteFile(id);
+    }
+
+    @Delete('folder/:id/permanent')
+    async permanentlyDeleteFolder(@Param('id') id: string) {
+        return this.fileManagerService.permanentlyDeleteFolder(id);
+    }
+
+    @Delete('file/:id/permanent')
+    async permanentlyDeleteFile(@Param('id') id: string) {
+        return this.fileManagerService.permanentlyDeleteFile(id);
+    }
+
+    @Get('sync-sizes')
+    async syncSizes() {
+        return this.fileManagerService.syncFileSizes();
     }
 }

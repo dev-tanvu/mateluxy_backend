@@ -1,15 +1,22 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UploadService } from '../upload/upload.service';
 
 @Injectable()
-export class FileManagerService {
+export class FileManagerService implements OnModuleInit {
     private readonly logger = new Logger(FileManagerService.name);
 
     constructor(
         private readonly prisma: PrismaService,
         private readonly uploadService: UploadService,
     ) { }
+
+    async onModuleInit() {
+        // Trigger a sync on startup to fix any 0B files
+        this.syncFileSizes().catch(err => {
+            this.logger.error('Initial file size sync failed', err);
+        });
+    }
 
     async createFolder(name: string, parentId?: string, isSystem: boolean = false) {
         return this.prisma.folder.create({
@@ -114,219 +121,144 @@ export class FileManagerService {
         return breadcrumbs;
     }
 
-    async uploadFile(file: Express.Multer.File, folderId?: string) {
-        // Upload to S3 via UploadService
-        const url = await this.uploadService.uploadFile(file);
-        if (!url) return null;
+    async getStorageStats() {
+        const s3Usage = await this.uploadService.getS3Usage();
 
-        // Create File record
-        return this.prisma.file.create({
-            data: {
-                name: file.originalname,
-                url,
-                mimeType: file.mimetype,
-                size: file.size,
-                folderId: folderId ?? null,
+        const stats = {
+            totalUsed: s3Usage.totalSizeBytes,
+            totalCapacity: 10 * 1024 * 1024 * 1024, // 10GB Mock limit
+            categories: [
+                { name: 'Images', size: s3Usage.categories.images, color: '#00AAFF', icon: 'Image' },
+                { name: 'Videos', size: s3Usage.categories.videos, color: '#FFAA00', icon: 'Video' },
+                { name: 'Audio', size: s3Usage.categories.audio, color: '#AA00FF', icon: 'Music' },
+                { name: 'Archives', size: s3Usage.categories.archives, color: '#FF00AA', icon: 'Archive' },
+                { name: 'Documents', size: s3Usage.categories.documents, color: '#00FFAA', icon: 'FileText' },
+                { name: 'Fonts', size: s3Usage.categories.fonts, color: '#AAAAAA', icon: 'Type' },
+            ]
+        };
+
+        return stats;
+    }
+
+    async syncFileSizes() {
+        this.logger.log('Starting sync of file sizes for 0B files...');
+        const filesWithZeroSize = await this.prisma.file.findMany({
+            where: { size: 0, isDeleted: false },
+            select: { id: true, url: true, name: true, mimeType: true }
+        });
+
+        this.logger.log(`Found ${filesWithZeroSize.length} files with 0 size to sync.`);
+
+        let updatedCount = 0;
+        for (const file of filesWithZeroSize) {
+            try {
+                this.logger.debug(`Processing file: ${file.name} (${file.url})`);
+                const metadata = await this.uploadService.getFileMetadata(file.url);
+                this.logger.debug(`Metadata result for ${file.name}: size=${metadata.size}, mime=${metadata.mimeType}`);
+
+                if (metadata.size > 0) {
+                    await this.prisma.file.update({
+                        where: { id: file.id },
+                        data: {
+                            size: metadata.size,
+                            mimeType: file.mimeType === 'application/octet-stream' ? metadata.mimeType : undefined
+                        }
+                    });
+                    updatedCount++;
+                    this.logger.log(`Updated ${file.name} size to ${metadata.size}`);
+                } else {
+                    this.logger.warn(`Failed to retrieve size for ${file.name} (ID: ${file.id}), URL: ${file.url}`);
+                }
+            } catch (e) {
+                this.logger.error(`Failed to sync size for file ${file.id}: ${e.message}`);
+            }
+        }
+
+        this.logger.log(`File sync completed. Updated ${updatedCount} files.`);
+
+        // Sync Folder Sizes
+        this.logger.log('Starting sync of folder sizes...');
+        const folders = await this.prisma.folder.findMany({
+            where: { isDeleted: false }
+        });
+
+        let updatedFolders = 0;
+        for (const folder of folders) {
+            const realSize = await this.getFolderSize(folder.id);
+            if (realSize !== folder.size) {
+                await this.prisma.folder.update({
+                    where: { id: folder.id },
+                    data: { size: realSize }
+                });
+                updatedFolders++;
+            }
+        }
+        this.logger.log(`Folder sync completed. Updated ${updatedFolders} folders.`);
+
+        return { updatedCount, totalFound: filesWithZeroSize.length, updatedFolders };
+    }
+
+    async getFilesByCategory(category: string) {
+        const s3Files = await this.uploadService.getS3Files();
+
+        const categoryMap: { [key: string]: string[] } = {
+            'images': ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'heic', 'bmp', 'tiff'],
+            'videos': ['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'wmv'],
+            'audio': ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'],
+            'documents': ['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'rtf'],
+            'archives': ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'],
+            'fonts': ['ttf', 'otf', 'woff', 'woff2', 'eot']
+        };
+
+        const extensions = categoryMap[category.toLowerCase()] || [];
+
+        const files = await this.prisma.file.findMany({
+            where: {
+                isDeleted: false,
+                OR: extensions.map(ext => ({
+                    url: { endsWith: `.${ext}`, mode: 'insensitive' }
+                }))
             },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        return files;
+    }
+
+    async getRecentFiles() {
+        return this.prisma.file.findMany({
+            where: { isDeleted: false },
+            orderBy: { createdAt: 'desc' },
+            take: 20
         });
     }
 
-    // Virtual move/copy logic to be added
+    async getDeletedItems() {
+        const folders = await this.prisma.folder.findMany({
+            where: { isDeleted: true },
+            orderBy: { deletedAt: 'desc' }
+        });
 
-    // --- Automation Helpers ---
+        const files = await this.prisma.file.findMany({
+            where: { isDeleted: true },
+            orderBy: { deletedAt: 'desc' }
+        });
 
-    async ensureFolderStructure(path: string[]): Promise<string> {
-        // path e.g. ["Properties", "My Property Ref"]
-        // Returns the ID of the last folder
+        return { folders, files };
+    }
 
-        let parentId: string | null = null;
+    async uploadFile(file: Express.Multer.File, folderId?: string) {
+        const url = await this.uploadService.uploadFile(file);
+        if (!url) throw new Error('Failed to upload file to S3');
 
-        for (const segment of path) {
-            // Find existing
-            let folder = await this.prisma.folder.findFirst({
-                where: {
-                    name: segment,
-                    parentId: parentId
-                }
-            });
-
-            // Create if not exists
-            if (!folder) {
-                folder = await this.prisma.folder.create({
-                    data: {
-                        name: segment,
-                        parentId: parentId,
-                        isSystem: true, // Auto-created folders are system folders
-                    }
-                });
+        return this.prisma.file.create({
+            data: {
+                name: file.originalname,
+                url: url,
+                mimeType: file.mimetype,
+                size: file.size,
+                folderId: folderId,
             }
-
-            parentId = folder.id;
-        }
-
-        return parentId!;
-    }
-
-    // --- Entity Specific Automation ---
-
-    async createPropertyStructure(property: any, fileUrls: any) {
-        // Folder: Properties / [Reference]
-        const reference = property.reference || property.propertyTitle || 'Untitled Property';
-        const rootId = await this.ensureFolderStructure(['Properties', reference]);
-
-        // 1. Cover Photo
-        if (fileUrls.coverPhoto) {
-            await this.registerSystemFile(fileUrls.coverPhoto, 'Cover Photo', rootId);
-        }
-
-        // 2. Media Images -> "media" folder
-        if (fileUrls.mediaImages && fileUrls.mediaImages.length > 0) {
-            const mediaId = await this.ensureFolderStructure(['Properties', reference, 'media']);
-            for (const url of fileUrls.mediaImages) {
-                await this.registerSystemFile(url, 'Image', mediaId);
-            }
-        }
-
-        // 3. Documents -> "documents" folder (NOC, Title Deed, etc)
-        const docsToCheck = ['nocDocument', 'passportCopy', 'emiratesIdScan', 'titleDeed'];
-        const hasDocs = docsToCheck.some(key => fileUrls[key]);
-
-        if (hasDocs) {
-            const docId = await this.ensureFolderStructure(['Properties', reference, 'documents']);
-            if (fileUrls.nocDocument) await this.registerSystemFile(fileUrls.nocDocument, 'NOC', docId);
-            if (fileUrls.passportCopy) await this.registerSystemFile(fileUrls.passportCopy, 'Passport', docId);
-            if (fileUrls.emiratesIdScan) await this.registerSystemFile(fileUrls.emiratesIdScan, 'Emirates ID', docId);
-            if (fileUrls.titleDeed) await this.registerSystemFile(fileUrls.titleDeed, 'Title Deed', docId);
-        }
-    }
-
-    async createOffPlanStructure(property: any, urls: any) {
-        // Folder: Off Plan / [Project Title]
-        const title = property.projectTitle || 'Untitled Project';
-        const rootId = await this.ensureFolderStructure(['Off Plan', title]);
-
-        // Cover
-        if (urls.coverPhoto) await this.registerSystemFile(urls.coverPhoto, 'Cover Photo', rootId);
-
-        // Subfolders
-        if (urls.exteriorMedia?.length) {
-            const extId = await this.ensureFolderStructure(['Off Plan', title, 'exterior']);
-            for (const url of urls.exteriorMedia) {
-                await this.registerSystemFile(url, 'Exterior', extId);
-            }
-        }
-
-        if (urls.interiorMedia?.length) {
-            const intId = await this.ensureFolderStructure(['Off Plan', title, 'interior']);
-            for (const url of urls.interiorMedia) {
-                await this.registerSystemFile(url, 'Interior', intId);
-            }
-        }
-
-        // Brochure
-        if (urls.brochure) await this.registerSystemFile(urls.brochure, 'Brochure', rootId);
-    }
-
-    async createAgentFolder(agent: any, photoUrl?: string, vcardUrl?: string, licenseUrl?: string) {
-        const rootId = await this.ensureFolderStructure(['Agents', agent.name]);
-        if (photoUrl) await this.registerSystemFile(photoUrl, 'Photo', rootId);
-        if (vcardUrl) await this.registerSystemFile(vcardUrl, 'VCard', rootId);
-        if (licenseUrl) await this.registerSystemFile(licenseUrl, 'License', rootId);
-    }
-
-    async createDeveloperFolder(developer: any, logoUrl?: string, salesPhotoUrl?: string) {
-        const rootId = await this.ensureFolderStructure(['Developers', developer.name]);
-        if (logoUrl) await this.registerSystemFile(logoUrl, 'Logo', rootId);
-        if (salesPhotoUrl) await this.registerSystemFile(salesPhotoUrl, 'Sales Manager', rootId);
-    }
-
-    async createTenancyContractStructure(contract: any, pdfUrl: string) {
-        const rootId = await this.ensureFolderStructure(['Tenancy Contracts']);
-        await this.registerSystemFile(pdfUrl, `Tenancy Contract - ${contract.id}.pdf`, rootId);
-    }
-
-    async createNocFolder(noc: any, pdfUrl?: string) {
-        const rootId = await this.ensureFolderStructure(['Mateluxy NOC']);
-        if (pdfUrl) await this.registerSystemFile(pdfUrl, `Signed NOC - ${noc.id}.pdf`, rootId);
-    }
-
-    async createUserFolder(user: any, avatarUrl?: string) {
-        if (!avatarUrl) return;
-
-        try {
-            const rootId = await this.ensureFolderStructure(['Users', user.username || user.emails?.[0] || 'Unknown']);
-            await this.registerSystemFile(avatarUrl, 'avatar', rootId);
-        } catch (e) {
-            this.logger.error(`Failed to register User files`, e);
-        }
-    }
-
-    async migrateAllData() {
-        this.logger.log('Starting migration of existing data to File Manager...');
-        let count = 0;
-
-        // 1. Developers
-        const developers = await this.prisma.developer.findMany();
-        for (const dev of developers) {
-            await this.createDeveloperFolder(dev, dev.logoUrl || undefined, dev.salesManagerPhotoUrl || undefined);
-            count++;
-        }
-
-        // 2. Agents
-        const agents = await this.prisma.agent.findMany();
-        for (const agent of agents) {
-            await this.createAgentFolder(agent, agent.photoUrl || undefined, undefined, agent.licenseDocumentUrl || undefined);
-            count++;
-        }
-
-        // 3. Properties
-        const properties = await this.prisma.property.findMany();
-        for (const prop of properties) {
-            const files = {
-                coverPhoto: prop.coverPhoto,
-                mediaImages: prop.mediaImages,
-                videoUrl: prop.videoUrl,
-                nocDocument: prop.nocDocument,
-                passportCopy: prop.passportCopy,
-                emiratesIdScan: prop.emiratesIdScan,
-                titleDeed: prop.titleDeed,
-            };
-            await this.createPropertyStructure(prop, files);
-            count++;
-        }
-
-        // 4. Off-Plan
-        const offPlan = await this.prisma.offPlanProperty.findMany();
-        for (const op of offPlan) {
-            const urls = {
-                coverPhoto: op.coverPhoto,
-                interiorMedia: op.interiorMedia,
-                exteriorMedia: op.exteriorMedia,
-                brochure: op.brochure,
-            };
-            await this.createOffPlanStructure(op, urls);
-            count++;
-        }
-
-        // 5. Users
-        const users = await this.prisma.user.findMany();
-        for (const user of users) {
-            await this.createUserFolder(user, user.avatarUrl || undefined);
-            count++;
-        }
-
-        this.logger.log(`Migration completed. Processed ${count} entities.`);
-        return { message: 'Migration completed', count };
-    }
-
-    async deleteFile(fileId: string) {
-        const file = await this.prisma.file.findUnique({ where: { id: fileId } });
-        if (!file) throw new Error('File not found');
-
-        // Soft delete from DB
-        return this.prisma.file.update({
-            where: { id: fileId },
-            data: { isDeleted: true, deletedAt: new Date() }
         });
     }
 
@@ -338,198 +270,397 @@ export class FileManagerService {
     }
 
     async deleteFolder(folderId: string) {
-        const folder = await this.prisma.folder.findUnique({
+        // Soft delete folder and all its contents recursively
+        await this.prisma.folder.update({
             where: { id: folderId },
+            data: { isDeleted: true, deletedAt: new Date() }
         });
 
-        if (!folder) throw new Error('Folder not found');
-
-        // Soft delete folder and all contents recursively (logic wise, path-based filters handle it)
-        // For real recursive soft delete:
+        // Soft delete files in this folder
         await this.prisma.file.updateMany({
             where: { folderId },
             data: { isDeleted: true, deletedAt: new Date() }
         });
 
-        return this.prisma.folder.update({
-            where: { id: folderId },
-            data: { isDeleted: true, deletedAt: new Date() }
+        // Recursively soft delete subfolders
+        const subfolders = await this.prisma.folder.findMany({
+            where: { parentId: folderId }
         });
+
+        for (const sub of subfolders) {
+            await this.deleteFolder(sub.id);
+        }
     }
 
     async restoreFolder(folderId: string) {
+        await this.prisma.folder.update({
+            where: { id: folderId },
+            data: { isDeleted: false, deletedAt: null }
+        });
+
         await this.prisma.file.updateMany({
             where: { folderId },
             data: { isDeleted: false, deletedAt: null }
         });
 
+        const subfolders = await this.prisma.folder.findMany({
+            where: { parentId: folderId }
+        });
+
+        for (const sub of subfolders) {
+            await this.restoreFolder(sub.id);
+        }
+    }
+
+    async renameFolder(id: string, name: string) {
         return this.prisma.folder.update({
-            where: { id: folderId },
-            data: { isDeleted: false, deletedAt: null }
+            where: { id },
+            data: { name }
         });
     }
 
-    async getStorageStats() {
-        const files = await this.prisma.file.findMany({
-            where: { isDeleted: false },
-            select: { size: true, mimeType: true }
+    async renameFile(id: string, name: string) {
+        return this.prisma.file.update({
+            where: { id },
+            data: { name }
         });
+    }
 
-        const totalLimit = 150 * 1024 * 1024 * 1024; // 150 GB
-        const stats = {
-            totalLimit,
-            usedSize: 0,
-            categories: {
-                images: 0,
-                videos: 0,
-                audio: 0,
-                archives: 0,
-                documents: 0,
-                fonts: 0,
-                others: 0
+    async moveFolder(id: string, targetParentId: string | null) {
+        // Prevent moving a folder into itself or its children
+        if (targetParentId) {
+            let current: any = await this.prisma.folder.findUnique({
+                where: { id: targetParentId },
+                include: { parent: true }
+            });
+            while (current) {
+                if (current.id === id) throw new Error('Cannot move a folder into itself or its children');
+                if (!current.parentId) break;
+                current = await this.prisma.folder.findUnique({
+                    where: { id: current.parentId },
+                    include: { parent: true }
+                });
             }
-        };
-
-        files.forEach(file => {
-            stats.usedSize += file.size;
-            const mime = file.mimeType.toLowerCase();
-            if (mime.startsWith('image/')) stats.categories.images += file.size || 0;
-            else if (mime.startsWith('video/')) stats.categories.videos += file.size || 0;
-            else if (mime.startsWith('audio/')) stats.categories.audio += file.size || 0;
-            else if (mime === 'application/zip' || mime.includes('archive') || mime.includes('compressed')) stats.categories.archives += file.size || 0;
-            else if (mime === 'application/pdf' || mime.includes('word') || mime.includes('openxmlformats') || mime.includes('spreadsheet') || mime.includes('text/')) stats.categories.documents += file.size || 0;
-            else if (mime.startsWith('font/')) stats.categories.fonts += file.size || 0;
-            else stats.categories.others += file.size || 0;
-        });
-
-        // Overlay with real S3 usage if available
-        try {
-            console.log(`FileManagerService: Calculating Stats... Prisma Usage: ${stats.usedSize}`);
-            const s3Usage = await this.uploadService.getS3Usage();
-            console.log(`FileManagerService: S3 Usage Result: ${s3Usage.totalSizeBytes}`);
-
-            if (s3Usage.totalSizeBytes > 0) {
-                stats.usedSize = s3Usage.totalSizeBytes;
-                stats.categories.images = s3Usage.categories.images;
-                stats.categories.videos = s3Usage.categories.videos;
-                stats.categories.audio = s3Usage.categories.audio;
-                stats.categories.documents = s3Usage.categories.documents;
-                stats.categories.archives = s3Usage.categories.archives || 0;
-                stats.categories.fonts = s3Usage.categories.fonts || 0;
-                stats.categories.others = s3Usage.categories.others;
-            } else {
-                console.log('FileManagerService: S3 Usage is 0, keeping Prisma usage.');
-            }
-        } catch (e) {
-            console.error('FileManagerService: Error fetching S3 usage', e);
         }
 
-        return stats;
+        return this.prisma.folder.update({
+            where: { id },
+            data: { parentId: targetParentId }
+        });
     }
 
-    async getFilesByCategory(category: string) {
-        const s3Files = await this.uploadService.getS3Files();
+    async moveFile(id: string, targetFolderId: string | null) {
+        return this.prisma.file.update({
+            where: { id },
+            data: { folderId: targetFolderId }
+        });
+    }
 
-        // File extension helpers
-        const getExt = (name: string) => name?.split('.').pop()?.toLowerCase() || '';
-        const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'ico', 'avif'];
-        const videoExts = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v', '3gp'];
-        const audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma'];
-        const documentExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'rtf', 'odt', 'ods', 'odp'];
-        const fontExts = ['ttf', 'otf', 'woff', 'woff2', 'eot'];
-        const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'];
+    async copyFile(id: string, targetFolderId: string | null) {
+        const file = await this.prisma.file.findUnique({ where: { id } });
+        if (!file) throw new Error('File not found');
 
-        return s3Files.filter(file => {
-            const ext = getExt(file.name);
-            const mime = (file.mimeType || '').toLowerCase();
-
-            switch (category.toLowerCase()) {
-                case 'images':
-                    return imageExts.includes(ext) || mime.startsWith('image/');
-                case 'videos':
-                    return videoExts.includes(ext) || mime.startsWith('video/');
-                case 'audio':
-                    return audioExts.includes(ext) || mime.startsWith('audio/');
-                case 'documents':
-                    return documentExts.includes(ext) ||
-                        mime === 'application/pdf' ||
-                        mime.includes('word') ||
-                        mime.includes('spreadsheet');
-                case 'fonts':
-                    return fontExts.includes(ext) || mime.includes('font');
-                case 'archives':
-                    return archiveExts.includes(ext) ||
-                        mime.includes('zip') ||
-                        mime.includes('rar') ||
-                        mime.includes('tar');
-                case 'others':
-                    // Everything that doesn't fit above
-                    const isImg = imageExts.includes(ext) || mime.startsWith('image/');
-                    const isVid = videoExts.includes(ext) || mime.startsWith('video/');
-                    const isAud = audioExts.includes(ext) || mime.startsWith('audio/');
-                    const isDoc = documentExts.includes(ext) || mime === 'application/pdf' || mime.includes('word') || mime.includes('spreadsheet');
-                    const isFont = fontExts.includes(ext) || mime.includes('font');
-                    const isArchive = archiveExts.includes(ext) || mime.includes('zip') || mime.includes('rar') || mime.includes('tar');
-                    return !isImg && !isVid && !isAud && !isDoc && !isFont && !isArchive;
-                default:
-                    return true;
+        return this.prisma.file.create({
+            data: {
+                name: `Copy of ${file.name}`,
+                url: file.url,
+                mimeType: file.mimeType,
+                size: file.size,
+                folderId: targetFolderId
             }
         });
     }
 
-    async getRecentFiles() {
-        return this.prisma.file.findMany({
-            where: { isDeleted: false },
-            orderBy: { updatedAt: 'desc' },
-            take: 10,
-            include: { folder: true }
+    async copyFolder(id: string, targetParentId: string | null) {
+        const folder = await this.prisma.folder.findUnique({ where: { id } });
+        if (!folder) throw new Error('Folder not found');
+
+        const newFolder = await this.prisma.folder.create({
+            data: {
+                name: `Copy of ${folder.name}`,
+                parentId: targetParentId,
+                isSystem: folder.isSystem
+            }
+        });
+
+        await this.copyFolderRecursive(id, newFolder.id);
+        return newFolder;
+    }
+
+    private async copyFolderRecursive(sourceId: string, targetId: string) {
+        // Copy files
+        const files = await this.prisma.file.findMany({ where: { folderId: sourceId, isDeleted: false } });
+        for (const file of files) {
+            await this.prisma.file.create({
+                data: {
+                    name: file.name,
+                    url: file.url,
+                    mimeType: file.mimeType,
+                    size: file.size,
+                    folderId: targetId
+                }
+            });
+        }
+
+        // Copy subfolders
+        const subfolders = await this.prisma.folder.findMany({ where: { parentId: sourceId, isDeleted: false } });
+        for (const sub of subfolders) {
+            const newSub = await this.prisma.folder.create({
+                data: {
+                    name: sub.name,
+                    parentId: targetId,
+                    isSystem: sub.isSystem
+                }
+            });
+            await this.copyFolderRecursive(sub.id, newSub.id);
+        }
+    }
+
+    async ensureFolderStructure(path: string): Promise<string> {
+        const segments = path.split('/').filter(s => s.length > 0);
+        let parentId: string | null = null;
+
+        for (const segment of segments) {
+            let folder = await this.prisma.folder.findFirst({
+                where: { name: segment, parentId, isDeleted: false }
+            });
+
+            if (!folder) {
+                folder = await this.prisma.folder.create({
+                    data: { name: segment, parentId, isSystem: true }
+                });
+            }
+            parentId = folder.id;
+        }
+
+        return parentId!;
+    }
+
+    async createPropertyStructure(property: any, fileUrls: any) {
+        const propFolderId = await this.ensureFolderStructure(`Properties/${property.title}`);
+
+        // Photos
+        if (fileUrls.images && fileUrls.images.length > 0) {
+            const photosFolderId = await this.createFolder('Photos', propFolderId, true);
+            for (const url of fileUrls.images) {
+                await this.registerSystemFile(url, property.title, photosFolderId.id);
+            }
+        }
+
+        const documentsFolderId = await this.createFolder('Documents', propFolderId, true);
+        if (fileUrls.floorPlans && fileUrls.floorPlans.length > 0) {
+            for (const url of fileUrls.floorPlans) {
+                await this.registerSystemFile(url, 'Floor Plan', documentsFolderId.id);
+            }
+        }
+        if (fileUrls.qrCodeUrl) {
+            await this.registerSystemFile(fileUrls.qrCodeUrl, 'QR Code', documentsFolderId.id);
+        }
+
+        if (fileUrls.videoTourUrl) {
+            const videosFolderId = await this.createFolder('Videos', propFolderId, true);
+            await this.registerSystemFile(fileUrls.videoTourUrl, 'Video Tour', videosFolderId.id);
+        }
+    }
+
+    async createOffPlanStructure(property: any, urls: any) {
+        const propFolderId = await this.ensureFolderStructure(`Off-Plan/${property.title}`);
+
+        if (urls.images && urls.images.length > 0) {
+            const photosFolderId = await this.createFolder('Photos', propFolderId, true);
+            for (const url of urls.images) {
+                await this.registerSystemFile(url, property.title, photosFolderId.id);
+            }
+        }
+
+        if (urls.brochureUrl) {
+            const docsFolderId = await this.createFolder('Documents', propFolderId, true);
+            await this.registerSystemFile(urls.brochureUrl, 'Brochure', docsFolderId.id);
+        }
+
+        if (urls.paymentPlanUrl) {
+            const docsFolderId = await this.createFolder('Documents', propFolderId, true);
+            await this.registerSystemFile(urls.paymentPlanUrl, 'Payment Plan', docsFolderId.id);
+        }
+
+        if (urls.videoUrl) {
+            const videosFolderId = await this.createFolder('Videos', propFolderId, true);
+            await this.registerSystemFile(urls.videoUrl, 'Video Tour', videosFolderId.id);
+        }
+    }
+
+    async createAgentFolder(agent: any, photoUrl: string, vcardUrl: string, licenseUrl: string) {
+        const agentFolderId = await this.ensureFolderStructure(`Agents/${agent.name}`);
+
+        if (photoUrl) {
+            await this.registerSystemFile(photoUrl, `${agent.name} Photo`, agentFolderId);
+        }
+        if (vcardUrl) {
+            await this.registerSystemFile(vcardUrl, `${agent.name} VCard`, agentFolderId);
+        }
+        if (licenseUrl) {
+            await this.registerSystemFile(licenseUrl, `${agent.name} License`, agentFolderId);
+        }
+    }
+
+    async createTenancyContractStructure(contract: any, pdfUrl: string) {
+        const contractFolderId = await this.ensureFolderStructure(`Tenancy Contracts/${contract.contractNumber}`);
+        await this.registerSystemFile(pdfUrl, `Contract ${contract.contractNumber}`, contractFolderId);
+    }
+
+    async createNocFolder(noc: any, pdfUrl: string) {
+        const nocFolderId = await this.ensureFolderStructure(`NOCs/${noc.nocNumber}`);
+        await this.registerSystemFile(pdfUrl, `NOC ${noc.nocNumber}`, nocFolderId);
+    }
+
+    async createUserFolder(user: any, avatarUrl: string) {
+        const userFolderId = await this.ensureFolderStructure(`Users/${user.firstName} ${user.lastName}`);
+        if (avatarUrl) {
+            await this.registerSystemFile(avatarUrl, `${user.firstName} Avatar`, userFolderId);
+        }
+    }
+
+    async createDeveloperFolder(developer: any, logoUrl?: string, salesManagerPhotoUrl?: string) {
+        if (!developer) return;
+
+        // 1. Create Developer Folder in "Developers" root folder
+        let developersFolder = await this.prisma.folder.findFirst({
+            where: { name: 'Developers', parentId: null }
+        });
+
+        if (!developersFolder) {
+            developersFolder = await this.prisma.folder.create({
+                data: { name: 'Developers', isSystem: true }
+            });
+        }
+
+        const devFolder = await this.createFolder(developer.name, developersFolder.id, true);
+
+        // 2. Add Developer Logo and Sales Manager Photo
+        if (logoUrl) {
+            await this.registerSystemFile(logoUrl, 'logo', devFolder.id);
+        }
+        if (salesManagerPhotoUrl) {
+            await this.registerSystemFile(salesManagerPhotoUrl, 'sales_manager_photo', devFolder.id);
+        }
+
+        return devFolder;
+    }
+
+    async migrateAllData() {
+        const properties = await this.prisma.property.findMany();
+        for (const prop of properties) {
+            await this.createPropertyStructure(prop, {
+                images: prop.mediaImages || [],
+                floorPlans: [],
+                qrCodeUrl: prop.dldQrCode,
+                videoTourUrl: prop.videoUrl
+            });
+        }
+
+        const offPlanProperties = await this.prisma.offPlanProperty.findMany();
+        for (const prop of offPlanProperties) {
+            const images = [
+                ...(prop.exteriorMedia || []),
+                ...(prop.interiorMedia || []),
+            ];
+
+            // Extract floor plan images from JSON if possible
+            if (Array.isArray(prop.floorPlans)) {
+                const fpImages = (prop.floorPlans as any[]).map(f => f.floorPlanImage).filter(Boolean);
+                images.push(...fpImages);
+            }
+
+            await this.createOffPlanStructure(prop, {
+                images,
+                brochureUrl: prop.brochure,
+                paymentPlanUrl: '',
+                videoUrl: prop.videoUrl
+            });
+        }
+
+        const agents = await this.prisma.agent.findMany();
+        for (const agent of agents) {
+            await this.createAgentFolder(agent, agent.photoUrl || '', agent.vcardUrl || '', agent.licenseDocumentUrl || '');
+        }
+
+        const users = await this.prisma.user.findMany();
+        for (const user of users) {
+            await this.createUserFolder(user, user.avatarUrl!);
+        }
+
+        return { message: 'Migration completed' };
+    }
+
+    async deleteFile(fileId: string) {
+        return this.prisma.file.update({
+            where: { id: fileId },
+            data: { isDeleted: true, deletedAt: new Date() }
         });
     }
 
-    async getDeletedItems() {
-        const files = await this.prisma.file.findMany({
-            where: { isDeleted: true },
-            orderBy: { deletedAt: 'desc' },
-            take: 20
+    async permanentlyDeleteFile(fileId: string) {
+        const file = await this.prisma.file.findUnique({ where: { id: fileId } });
+        if (file) {
+            // Delete from S3 only if it's an uploaded file (optional, depends on policy)
+            // await this.uploadService.deleteFile(file.url);
+            return this.prisma.file.delete({ where: { id: fileId } });
+        }
+    }
+
+    async permanentlyDeleteFolder(folderId: string) {
+        // Recursively delete subfolders and files
+        const subfolders = await this.prisma.folder.findMany({ where: { parentId: folderId } });
+        for (const sub of subfolders) {
+            await this.permanentlyDeleteFolder(sub.id);
+        }
+
+        await this.prisma.file.deleteMany({ where: { folderId } });
+        return this.prisma.folder.delete({ where: { id: folderId } });
+    }
+
+    async cleanupDeletedItems() {
+        const fifteenDaysAgo = new Date();
+        fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+
+        const filesToDelete = await this.prisma.file.findMany({
+            where: { isDeleted: true, deletedAt: { lt: fifteenDaysAgo } }
         });
 
-        const folders = await this.prisma.folder.findMany({
-            where: { isDeleted: true },
-            orderBy: { deletedAt: 'desc' },
-            take: 20
+        for (const file of filesToDelete) {
+            await this.permanentlyDeleteFile(file.id);
+        }
+
+        const foldersToDelete = await this.prisma.folder.findMany({
+            where: { isDeleted: true, deletedAt: { lt: fifteenDaysAgo } }
         });
 
-        return { files, folders };
+        for (const folder of foldersToDelete) {
+            await this.permanentlyDeleteFolder(folder.id);
+        }
     }
 
     async registerSystemFile(url: string, nameHint: string, folderId: string) {
-        // Check if already exists in this folder to avoid dupes?
-        // For simplicity, just create. filename will be derived or generic.
+        if (!url) return;
+        const filename = url.split('/').pop() || nameHint;
 
-        // Try to get filename from URL
-        let filename = nameHint;
         try {
-            const urlParts = url.split('/');
-            const lastPart = urlParts[urlParts.length - 1];
-            if (lastPart && lastPart.includes('.')) {
-                // If it looks like a filename (has ext), use it, but maybe prepend hint
-                // Actually user probably wants clean names.
-                // Let's use the hint + extension if possible, or just the UUID from S3 if no hint useful
-                filename = lastPart;
-            } else {
-                filename = `${nameHint}`; // + ext?
-            }
+            const existing = await this.prisma.file.findFirst({
+                where: { url, folderId, isDeleted: false }
+            });
+            if (existing) return;
         } catch (e) { }
 
+        // Fetch real metadata if possible
+        const metadata = await this.uploadService.getFileMetadata(url);
+
         // Create File record
-        // We don't have mimeType/size easily for URLs unless we HEAD them or used upload service return.
-        // For now, allow 0/unknown.
         await this.prisma.file.create({
             data: {
                 name: filename,
                 url: url,
-                mimeType: 'application/octet-stream', // Unknown
-                size: 0,
+                mimeType: metadata.mimeType || 'application/octet-stream',
+                size: metadata.size || 0,
                 folderId: folderId,
             }
         });
