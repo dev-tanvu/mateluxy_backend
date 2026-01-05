@@ -265,8 +265,8 @@ export class PropertiesService {
         try {
             // Sequential execution for stability
             // 1. Active Counts
-            const activeProperties = await this.prisma.property.count({ where: { isActive: true } });
-            const activePropertiesNew = await this.prisma.property.count({ where: { isActive: true, createdAt: { gte: lastWeek } } });
+            const activeProperties = await this.prisma.property.count({ where: { isActive: true, pfPublished: true } });
+            const activePropertiesNew = await this.prisma.property.count({ where: { isActive: true, pfPublished: true, createdAt: { gte: lastWeek } } });
 
             const activeOffPlan = await this.prisma.offPlanProperty.count({ where: { isActive: true } });
             const activeOffPlanNew = await this.prisma.offPlanProperty.count({ where: { isActive: true, createdAt: { gte: lastWeek } } });
@@ -635,7 +635,10 @@ export class PropertiesService {
                 amenities: amenities || [],
                 assignedAgent: assignedAgentId ? { connect: { id: assignedAgentId } } : undefined,
                 coverPhoto: fileUrls.coverPhoto,
-                mediaImages: fileUrls.mediaImages || [],
+                mediaImages: [
+                    ...(data.mediaImages || []), // Existing URLs from frontend
+                    ...(fileUrls.mediaImages || []) // New file uploads
+                ],
                 nocDocument: fileUrls.nocDocument,
                 passportCopy: fileUrls.passportCopy,
                 emiratesIdScan: fileUrls.emiratesIdScan,
@@ -711,21 +714,31 @@ export class PropertiesService {
             data.coverPhoto = files.coverPhoto;
         }
 
-        if (files.mediaImages && files.mediaImages.length > 0) {
-            // Fetch existing property checks could happen here if needed, but for now we append or replace?
-            // Usually update replaces or appends. Let's assume replace if provided or append?
-            // The frontend form sends "All" usually.
-            // If the user uploads NEW files, they come in `files`.
-            // Existing images might be in `updatePropertyDto`.
-            // This logic depends on frontend.
-            // But here we are dealing with NEWLY uploaded files.
-            // If we want to KEEP existing, we need to fetch first.
-            const existing = await this.prisma.property.findUnique({ where: { id }, select: { mediaImages: true } });
-            // Add new files to existing
-            if (existing) {
-                data.mediaImages = [...(existing.mediaImages || []), ...files.mediaImages];
-            } else {
-                data.mediaImages = files.mediaImages;
+        // Handle Media Images
+        // Start with any explicitly provided URLs in the DTO (existing images)
+        let newMediaImages: string[] = updatePropertyDto.mediaImages || [];
+
+        // If no explicit mediaImages were provided, we might want to fetch existing ones to append?
+        // BUT usually the frontend sends the "Keep" list. If the frontend sends an empty list, it means "delete all".
+        // If the frontend sends undefined, it means "don't change".
+        // However, here we are also receiving NEW files.
+        // Logic:
+        // 1. If updatePropertyDto.mediaImages is provided, use it as the base.
+        // 2. Append new file uploads to it.
+        // 3. If updatePropertyDto.mediaImages is NOT provided, we should probably APPEND new files to existing in DB.
+
+        if (updatePropertyDto.mediaImages !== undefined) {
+            // Explicit list provided (could be empty for delete all)
+            if (files.mediaImages && files.mediaImages.length > 0) {
+                newMediaImages = [...newMediaImages, ...files.mediaImages];
+            }
+            data.mediaImages = newMediaImages;
+        } else {
+            // No list provided, check if we have new files
+            if (files.mediaImages && files.mediaImages.length > 0) {
+                // Fetch existing to append
+                const existing = await this.prisma.property.findUnique({ where: { id }, select: { mediaImages: true } });
+                data.mediaImages = [...(existing?.mediaImages || []), ...files.mediaImages];
             }
         }
 
@@ -995,7 +1008,38 @@ export class PropertiesService {
         const category = (property.category || 'residential').toLowerCase();
 
         // Map purpose/offering: CRM uses 'Sale'/'Rent', PF uses 'sale'/'rent'
-        const purposeLower = (property.purpose || 'sale').toLowerCase().replace('sell', 'sale');
+        // If Project Status is set, it overrides standard offering_type logic for Sale properties
+        let purposeLower = (property.purpose || 'sale').toLowerCase().replace('sell', 'sale');
+        let projectStatus: string | undefined = undefined;
+        let completionDate: string | undefined = undefined;
+
+        if (purposeLower === 'sale' && property.projectStatus) {
+            // Map Project Status based on "Resale - Ready to move", "Resale - Off-plan", "Primary - Ready to move", "Primary - Off-Plan"
+            // Docs:
+            // Resale - Ready to move -> offering_type: sale, project_status: completed
+            // Resale - Off-plan -> offering_type: sale, project_status: off-plan
+            // Primary - Ready to move -> offering_type: primary-sale, project_status: completed
+            // Primary - Off-Plan -> offering_type: primary-sale, project_status: off-plan
+
+            const status = property.projectStatus;
+
+            if (status.includes('Primary')) {
+                purposeLower = 'primary-sale';
+            } else {
+                purposeLower = 'sale';
+            }
+
+            if (status.includes('Off-plan') || status.includes('Off-Plan')) {
+                projectStatus = 'off-plan';
+                // Completion Date is required for Off-plan
+                if (property.completionDate) {
+                    completionDate = property.completionDate; // Assuming YYYY-MM format from frontend
+                }
+            } else {
+                projectStatus = 'completed';
+            }
+        }
+
         const priceType = purposeLower === 'rent' ? 'yearly' : 'sale';
 
         // Map property type to PF format
@@ -1228,6 +1272,18 @@ export class PropertiesService {
         // Add finishing type
         if (property.finishingType) {
             listing.finishingType = property.finishingType.toLowerCase();
+        }
+
+        // Add Project Status and Completion Date
+        if (projectStatus) {
+            listing.project_status = projectStatus;
+        }
+        if (completionDate) {
+            listing.completion_date = completionDate;
+        }
+        // Add payment plan if off-plan (optional but recommended)
+        if (purposeLower === 'primary-sale' || projectStatus === 'off-plan') {
+            listing.payment_plan = 'Contact for details';
         }
 
         return listing;
@@ -1608,6 +1664,39 @@ export class PropertiesService {
                     pfListing.state?.type === 'live' ||
                     ['published', 'live', 'listed'].includes(pfListing.status?.toLowerCase());
 
+                // Derive Project Status and Completion Date
+                // PF Fields: offeringType ('sale', 'rent', 'primary-sale'), project_status ('completed', 'off-plan')
+                // Note: PF API structure might vary, 'offeringType' or 'purpose'
+                const offeringType = pfListing.offeringType?.toLowerCase() || pfListing.purpose?.toLowerCase() || (isRental ? 'rent' : 'sale');
+                const pfProjectStatus = pfListing.project_status?.toLowerCase(); // 'completed' or 'off-plan'
+
+                let projectStatus: string | null = null;
+                let completionDate: string | null = null;
+
+                if (!isRental) {
+                    if (offeringType === 'primary-sale') {
+                        if (pfProjectStatus === 'off-plan' || pfProjectStatus === 'off_plan') {
+                            projectStatus = 'Primary - Off-Plan';
+                        } else {
+                            projectStatus = 'Primary - Ready to move';
+                        }
+                    } else {
+                        // Resale ('sale')
+                        if (pfProjectStatus === 'off-plan' || pfProjectStatus === 'off_plan') {
+                            projectStatus = 'Resale - Off-plan';
+                        } else {
+                            projectStatus = 'Resale - Ready to move';
+                        }
+                    }
+
+                    // Map Completion Date if Off-plan
+                    if (pfProjectStatus === 'off-plan' || pfProjectStatus === 'off_plan') {
+                        if (pfListing.completion_date) {
+                            completionDate = pfListing.completion_date;
+                        }
+                    }
+                }
+
                 const propertyData: any = {
                     // Basic info
                     category: pfListing.category || 'residential',
@@ -1615,6 +1704,10 @@ export class PropertiesService {
                     propertyType: pfListing.type || 'apartment',
                     propertyTitle: pfListing.title?.en || pfListing.title || '',
                     propertyDescription: pfListing.description?.en || pfListing.description || '',
+
+                    // Project Status Mapping
+                    projectStatus: projectStatus,
+                    completionDate: completionDate,
 
                     // Pricing
                     price: priceValue,

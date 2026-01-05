@@ -230,6 +230,8 @@ model Property {
   bathrooms         Int?
   unitNumber        String?
   ownershipStatus   String?
+  projectStatus     String?    // "Resale - Ready to move", "Resale - Off-plan", "Primary - Ready to move", "Primary - Off-Plan"
+  completionDate    String?    // YYYY-MM, required if projectStatus is Off-plan
   parkingSpaces     String?
   
   // Locations
@@ -455,6 +457,7 @@ model Noc {
   rentalAmount        Float?
   saleAmount          Float?
   parking             String?
+  propertyNumber      String?
   
   // Terms and Conditions
   agreementType       String?   // 'exclusive' | 'non-exclusive'
@@ -462,7 +465,7 @@ model Noc {
   agreementDate       DateTime?
 
   // Contact Info & Location
-  clientPhone         String?   @unique // Unique phone number per NOC
+  clientPhone         String? // Unique phone number per NOC
   location            String?   // Google Maps Address
   latitude            Float?
   longitude           Float?

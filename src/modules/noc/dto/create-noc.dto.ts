@@ -83,6 +83,10 @@ export class CreateNocDto {
     @IsString()
     parking?: string;
 
+    @IsOptional()
+    @IsString()
+    propertyNumber?: string;
+
     // Terms
     @IsOptional()
     @IsString()

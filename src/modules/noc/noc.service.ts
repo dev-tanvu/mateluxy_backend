@@ -81,6 +81,7 @@ export class NocService {
                 rentalAmount: createNocDto.rentalAmount,
                 saleAmount: createNocDto.saleAmount,
                 parking: createNocDto.parking,
+                propertyNumber: createNocDto.propertyNumber,
 
                 // Terms
                 agreementType: createNocDto.agreementType,
@@ -142,6 +143,8 @@ export class NocService {
     }
 
     async generateAndUploadPdf(noc: any): Promise<string | null> {
+        this.logger.log(`FULL NOC DATA: ${JSON.stringify(noc, null, 2)}`); // Debug: Print full object
+        this.logger.log(`Generating PDF for NOC ${noc.id}, Property Number value: "${noc.propertyNumber}"`); // Debug: Specific field check
         try {
             const pdfBuffer = await this.generatePdfBuffer(noc);
 
@@ -169,336 +172,207 @@ export class NocService {
             doc.on('end', () => resolve(Buffer.concat(chunks)));
             doc.on('error', reject);
 
-            const MARGIN_LEFT = 40;
-            const PAGE_WIDTH = 595.28; // A4 width at 72 PPI
-            const CONTENT_WIDTH = PAGE_WIDTH - (MARGIN_LEFT * 2);
+            const MARGIN = 35; // Reduced margin
+            const PAGE_WIDTH = 595.28;
+            const CONTENT_WIDTH = PAGE_WIDTH - (MARGIN * 2);
+            let y = MARGIN;
 
-            // Colors
-            const COLOR_ORANGE = '#FF7F50'; // Approximate orange from image
-            const COLOR_BLACK = '#000000';
-            const COLOR_BLUE_HANDWRITTEN = '#1e3a8a'; // Dark blue for user input
-            const COLOR_GREY_LINE = '#d1d5db';
-
-            // Helper to draw text
-            const drawText = (text: string, x: number, y: number, font: string = 'Helvetica', size: number = 10, color: string = 'black', align: string = 'left', width?: number) => {
-                doc.font(font).fontSize(size).fillColor(color);
-                doc.text(text, x, y, { width: width, align: align as any });
+            // Styles
+            const COLORS = {
+                PRIMARY: '#000000',
+                SECONDARY: '#6B7280', // Gray-500
+                ACCENT: '#EF4444', // Red-500 (Mateluxy brand approx)
+                BORDER: '#E5E7EB', // Gray-200
             };
 
-            // Helper for user input text (Handwritten style simulation)
-            const drawInputValues = (text: string, x: number, y: number, width?: number) => {
-                if (!text) return;
-                doc.font('Courier-Bold').fontSize(11).fillColor(COLOR_BLUE_HANDWRITTEN); // Courier simulates typewriter/handwritten feel
-                doc.text(text, x, y - 2, { width: width, lineBreak: false, ellipsis: true });
+            // Fonts
+            doc.font('Helvetica');
+
+            // --- HELPER FUNCTIONS ---
+            const drawLabelValue = (label: string, value: string | number | null | undefined, x: number, y: number, width: number) => {
+                doc.font('Helvetica').fontSize(8).fillColor(COLORS.SECONDARY).text(label.toUpperCase(), x, y);
+                const valStr = value ? String(value) : '-';
+                doc.font('Helvetica-Bold').fontSize(10).fillColor(COLORS.PRIMARY).text(valStr, x, y + 12, { width: width, ellipsis: true });
             };
 
-            // Helper for section headers
-            const drawSectionHeader = (y: number, title: string) => {
-                doc.rect(MARGIN_LEFT, y, CONTENT_WIDTH, 20).fill(COLOR_ORANGE);
-                doc.font('Helvetica-Bold').fontSize(10).fillColor('white');
-                doc.text(title, MARGIN_LEFT + 10, y + 5);
-                return y + 25;
+            const drawSectionTitle = (title: string, topY: number) => {
+                doc.rect(MARGIN, topY, 3, 16).fill(COLORS.ACCENT);
+                doc.font('Helvetica-Bold').fontSize(12).fillColor(COLORS.PRIMARY).text(title, MARGIN + 10, topY + 2);
+                return topY + 30;
             };
 
-            // Helper for lines
-            const drawLine = (y: number) => {
-                doc.moveTo(MARGIN_LEFT, y).lineTo(PAGE_WIDTH - MARGIN_LEFT, y).strokeColor(COLOR_BLACK).lineWidth(0.5).stroke();
+            const drawDivider = (topY: number) => {
+                doc.moveTo(MARGIN, topY).lineTo(PAGE_WIDTH - MARGIN, topY).strokeColor(COLORS.BORDER).lineWidth(1).stroke();
+                return topY + 20;
             };
 
-            // Helper for checkbox circle
-            const drawCheckbox = (x: number, y: number, label: string, isChecked: boolean) => {
-                doc.circle(x, y, 6).lineWidth(1).strokeColor(COLOR_BLACK).stroke();
-                if (isChecked) {
-                    // Draw tick
-                    doc.lineWidth(1.5).strokeColor(COLOR_BLUE_HANDWRITTEN);
-                    doc.moveTo(x - 3, y).lineTo(x - 1, y + 3).lineTo(x + 4, y - 3).stroke();
-                }
-                doc.font('Helvetica').fontSize(10).fillColor(COLOR_BLACK);
-                doc.text(label, x + 15, y - 4);
-            };
-
-            // Helper to check page break
-            const checkPageBreak = (currentY: number, neededSpace: number) => {
-                if (currentY + neededSpace > doc.page.height - 50) {
+            const checkPageBreak = (currentY: number, needed: number) => {
+                if (currentY + needed > doc.page.height - MARGIN) {
                     doc.addPage();
-                    return 50; // New Y
+                    return MARGIN;
                 }
                 return currentY;
             };
 
-
             // --- HEADER ---
-            let y = 40;
-            // Logo
+            // Logo (Placeholder if missing)
             try {
                 const logoPath = '../frontend/public/Logo.png';
-                doc.image(logoPath, PAGE_WIDTH - MARGIN_LEFT - 80, y, { width: 80 });
+                doc.image(logoPath, MARGIN, y, { width: 100 });
             } catch (e) {
-                doc.circle(PAGE_WIDTH - MARGIN_LEFT - 40, y + 40, 30).fillColor('#eee').fill();
+                doc.font('Helvetica-Bold').fontSize(18).fillColor(COLORS.PRIMARY).text('MATELUXY', MARGIN, y);
             }
 
-            doc.fontSize(14).font('Helvetica-Bold').fillColor(COLOR_BLACK).text('Mateluxy Real Estate Broker L.L.C', MARGIN_LEFT, y);
-            y += 20;
-            doc.fontSize(9).font('Helvetica');
-            doc.text('Tel: +971 4 572 5420 Add: 601 Bay Square 13, Business Bay, Dubai, UAE.', MARGIN_LEFT, y);
-            y += 12;
-            doc.text('PO. Box: 453467 Email: info@mateluxy.com', MARGIN_LEFT, y);
-            y += 12;
-            doc.text('Website: www.mateluxy.com', MARGIN_LEFT, y);
+            // Company Info (Right aligned)
+            doc.fontSize(8).font('Helvetica').fillColor(COLORS.SECONDARY);
+            const infoY = y;
+            doc.text('Mateluxy Real Estate Broker L.L.C', MARGIN, infoY, { align: 'right' });
+            doc.text('601 Bay Square 13, Business Bay, Dubai', MARGIN, infoY + 12, { align: 'right' });
+            doc.text('+971 4 572 5420 | info@mateluxy.com', MARGIN, infoY + 24, { align: 'right' });
 
-            y += 25;
-            doc.fontSize(12).font('Helvetica-Bold').text('NOC / LISTING AGREEMENT/ AGREEMENT BETWEEN OWNER & BROKER', MARGIN_LEFT, y);
+            y += 45; // Reduced from 60
+            y = drawDivider(y);
 
-            y += 25;
-
-            // --- LANDLORD / OWNER DETAILS ---
-            y = drawSectionHeader(y, 'LANDLORD / OWNER DETAILS');
-            y += 5;
-
-            // DYNAMIC OWNER LIST
-            // Logic: Iterate all owners. Create a block for each.
-            if (noc.owners && noc.owners.length > 0) {
-                noc.owners.forEach((owner: any, index: number) => {
-                    y = checkPageBreak(y, 80); // Check if enough space for one owner block
-
-                    // Owner N Name
-                    drawText(`${index + 1}${getOrdinal(index + 1)} Owner Name:`, MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-                    doc.moveTo(MARGIN_LEFT + 100, y + 15).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 15).stroke();
-                    drawInputValues(owner.name, MARGIN_LEFT + 110, y + 2);
-                    y += 20;
-
-                    // ID/Passport and Mobile
-                    drawText('ID/Passport:', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-                    doc.moveTo(MARGIN_LEFT + 80, y + 15).lineTo(MARGIN_LEFT + 250, y + 15).stroke();
-                    drawInputValues(owner.emiratesId, MARGIN_LEFT + 90, y + 2);
-
-                    drawText('Mobile:', MARGIN_LEFT + 260, y + 5, 'Helvetica-Bold');
-                    doc.moveTo(MARGIN_LEFT + 310, y + 15).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 15).stroke();
-                    const phone = owner.phone ? `${owner.countryCode || ''} ${owner.phone}` : '';
-                    drawInputValues(phone, MARGIN_LEFT + 320, y + 2);
-                    y += 20;
-
-                    // Dates
-                    drawText('Issue Date:', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-                    doc.moveTo(MARGIN_LEFT + 80, y + 15).lineTo(MARGIN_LEFT + 250, y + 15).stroke();
-                    if (owner.issueDate) {
-                        const idate = new Date(owner.issueDate);
-                        drawInputValues(`${idate.getDate()}/${idate.getMonth() + 1}/${idate.getFullYear()}`, MARGIN_LEFT + 90, y + 2);
-                    }
-
-                    drawText('Expiry Date:', MARGIN_LEFT + 260, y + 5, 'Helvetica-Bold');
-                    doc.moveTo(MARGIN_LEFT + 330, y + 15).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 15).stroke();
-                    if (owner.expiryDate) {
-                        const edate = new Date(owner.expiryDate);
-                        drawInputValues(`${edate.getDate()}/${edate.getMonth() + 1}/${edate.getFullYear()}`, MARGIN_LEFT + 340, y + 2);
-                    }
-                    y += 25;
-                });
-            } else {
-                drawText('No owners details provided.', MARGIN_LEFT, y + 5);
-                y += 20;
-            }
-
+            // Document Title
+            doc.font('Helvetica-Bold').fontSize(14).fillColor(COLORS.PRIMARY).text('NOC / LISTING AGREEMENT', MARGIN, y, { align: 'center' }); // Reduced font size
+            y += 25; // Reduced from 40
 
             // --- PROPERTY DETAILS ---
-            y = checkPageBreak(y, 250);
-            y = drawSectionHeader(y, 'PROPERTY DETAILS');
-            y += 15;
+            y = drawSectionTitle('PROPERTY DETAILS', y);
 
-            // Checkboxes Row 1
-            const pType = noc.propertyType || '';
-            drawCheckbox(MARGIN_LEFT + 40, y, 'Villa', pType.toLowerCase() === 'villa');
-            drawCheckbox(MARGIN_LEFT + 150, y, 'Apartment', pType.toLowerCase() === 'apartment');
-            drawCheckbox(MARGIN_LEFT + 260, y, 'Office', pType.toLowerCase() === 'office');
-            drawCheckbox(MARGIN_LEFT + 370, y, 'Townhouse', pType.toLowerCase() === 'townhouse');
-            y += 20;
+            // Grid Layout for Property Details
+            // Row 1
+            drawLabelValue('Property Type', noc.propertyType, MARGIN, y, 150);
+            drawLabelValue('Building / Project', noc.buildingProjectName, MARGIN + 160, y, 150);
+            drawLabelValue('Reference / Prop No.', noc.propertyNumber, MARGIN + 320, y, 150);
+            y += 30; // Reduced from 40
 
-            // Checkboxes Row 2
-            drawCheckbox(MARGIN_LEFT + 40, y, 'Vacant', false);
-            drawCheckbox(MARGIN_LEFT + 150, y, 'Tenanted', false);
-            drawCheckbox(MARGIN_LEFT + 260, y, 'Furnished', false);
-            drawCheckbox(MARGIN_LEFT + 370, y, 'Unfurnished', false);
-            y += 20;
+            // Row 2
+            drawLabelValue('Community', noc.community, MARGIN, y, 150);
+            drawLabelValue('Street Name', noc.streetName, MARGIN + 160, y, 150);
+            drawLabelValue('Location (Map)', noc.location, MARGIN + 320, y, 150);
+            y += 50; // Increased to handle multi-line location addresses
 
-            // Vacating Date
-            drawText('Vacating Date:', MARGIN_LEFT + 30, y + 5);
-            doc.moveTo(MARGIN_LEFT + 110, y + 15).lineTo(MARGIN_LEFT + 300, y + 15).strokeColor(COLOR_BLACK).stroke();
-            y += 25;
+            // Row 3 (Metrics)
+            drawLabelValue('Built-up Area (Sq.ft)', noc.buildUpArea, MARGIN, y, 100);
+            drawLabelValue('Plot Area (Sq.ft)', noc.plotArea, MARGIN + 120, y, 100);
+            drawLabelValue('Bedrooms', noc.bedrooms, MARGIN + 240, y, 80);
+            drawLabelValue('Bathrooms', noc.bathrooms, MARGIN + 330, y, 80);
+            y += 30; // Reduced from 40
 
-            // Building / Project name
-            drawText('Building / Project name :', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawLine(y + 15);
-            drawInputValues(noc.buildingProjectName, MARGIN_LEFT + 130, y + 2);
-            y += 25;
-
-            // Property Number
-            drawText('Property Number', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 100, y + 5, 'Helvetica-Bold');
-            drawLine(y + 15);
-            // Property Number left blank as per schema limitation, but label present.
-            y += 25;
-
-            // Location (Added as requested)
-            drawText('Location', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 100, y + 5, 'Helvetica-Bold');
-            drawLine(y + 15);
-            drawInputValues(noc.location, MARGIN_LEFT + 110, y + 2);
-            y += 25;
-
-            // Community
-            drawText('Community', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 100, y + 5, 'Helvetica-Bold');
-            drawLine(y + 15);
-            drawInputValues(noc.community, MARGIN_LEFT + 110, y + 2);
-            y += 25;
-
-            // Street Name
-            drawText('Street Name', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 100, y + 5, 'Helvetica-Bold');
-            drawLine(y + 15);
-            drawInputValues(noc.streetName, MARGIN_LEFT + 110, y + 2);
-            y += 25;
-
-            // Grid: BUA | Plot
-            drawText('BUA (SQFT)', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 100, y + 5, 'Helvetica-Bold');
-            doc.moveTo(MARGIN_LEFT + 110, y + 15).lineTo(MARGIN_LEFT + 250, y + 15).stroke();
-            drawInputValues(noc.buildUpArea, MARGIN_LEFT + 120, y + 2);
-
-            drawText('Plot (SQFT)', MARGIN_LEFT + 260, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 330, y + 5, 'Helvetica-Bold');
-            doc.moveTo(MARGIN_LEFT + 340, y + 15).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 15).stroke();
-            drawInputValues(noc.plotArea, MARGIN_LEFT + 350, y + 2);
-            y += 25;
-
-            // Grid: Bedrooms | Bathrooms
-            drawText('Bedrooms', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 100, y + 5, 'Helvetica-Bold');
-            doc.moveTo(MARGIN_LEFT + 110, y + 15).lineTo(MARGIN_LEFT + 250, y + 15).stroke();
-            drawInputValues(noc.bedrooms, MARGIN_LEFT + 120, y + 2);
-
-            drawText('Bathrooms', MARGIN_LEFT + 260, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 330, y + 5, 'Helvetica-Bold');
-            doc.moveTo(MARGIN_LEFT + 340, y + 15).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 15).stroke();
-            drawInputValues(noc.bathrooms, MARGIN_LEFT + 350, y + 2);
-            y += 25;
-
-            // Grid: Rental Amount | Parking
-            drawText('Rental Amount', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 100, y + 5, 'Helvetica-Bold');
-            doc.moveTo(MARGIN_LEFT + 110, y + 15).lineTo(MARGIN_LEFT + 250, y + 15).stroke();
-            drawInputValues(noc.rentalAmount, MARGIN_LEFT + 120, y + 2);
-
-            drawText('Parking', MARGIN_LEFT + 260, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 330, y + 5, 'Helvetica-Bold');
-            doc.moveTo(MARGIN_LEFT + 340, y + 15).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 15).stroke();
-            drawInputValues(noc.parking, MARGIN_LEFT + 350, y + 2);
-            y += 25;
-
-            // Sale Amount
-            drawText('Sale Amount', MARGIN_LEFT, y + 5, 'Helvetica-Bold');
-            drawText(':', MARGIN_LEFT + 100, y + 5, 'Helvetica-Bold');
-            doc.moveTo(MARGIN_LEFT + 110, y + 15).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 15).stroke();
-            drawInputValues(noc.saleAmount, MARGIN_LEFT + 120, y + 2);
-            y += 35;
+            // Row 4 (Financials)
+            drawLabelValue('Rental Amount', noc.rentalAmount ? `AED ${noc.rentalAmount}` : null, MARGIN, y, 120);
+            drawLabelValue('Sale Amount', noc.saleAmount ? `AED ${noc.saleAmount}` : null, MARGIN + 140, y, 120);
+            drawLabelValue('Parking', noc.parking, MARGIN + 280, y, 200);
+            y += 35; // Reduced from 50
 
 
-            // --- TERMS AND CONDITIONS ---
+            // --- OWNERS DETAILS ---
             y = checkPageBreak(y, 150);
-            y = drawSectionHeader(y, 'TERMS AND CONDITIONS');
-            y += 10;
-
-            // Text
-            drawText('The landlord / legal representative has agreed to appoint', MARGIN_LEFT, y, 'Helvetica-Bold', 9);
-            drawText('Mateluxy Real Estate Broker L.L.C', PAGE_WIDTH - MARGIN_LEFT - 180, y, 'Helvetica', 10);
-
-            y += 15;
-            drawCheckbox(MARGIN_LEFT + 40, y, 'EXCLUSIVE', noc.agreementType === 'exclusive');
-            drawCheckbox(MARGIN_LEFT + 150, y, 'NON-EXCLUSIVE', noc.agreementType === 'non-exclusive');
-            y += 25;
-
-            drawText('Broker to list and advertise the above property for a period till', MARGIN_LEFT, y, 'Helvetica-Bold', 9);
-            // Date lines
-            doc.moveTo(MARGIN_LEFT + 350, y + 10).lineTo(MARGIN_LEFT + 400, y + 10).stroke();
-            doc.text('/', MARGIN_LEFT + 405, y);
-            doc.moveTo(MARGIN_LEFT + 410, y + 10).lineTo(MARGIN_LEFT + 460, y + 10).stroke();
-            doc.text('/', MARGIN_LEFT + 465, y);
-            doc.moveTo(MARGIN_LEFT + 470, y + 10).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 10).stroke();
-
-            if (noc.agreementDate) {
-                const ad = new Date(noc.agreementDate);
-                drawInputValues(ad.getDate().toString(), MARGIN_LEFT + 360, y + 2);
-                drawInputValues((ad.getMonth() + 1).toString(), MARGIN_LEFT + 420, y + 2);
-                drawInputValues(ad.getFullYear().toString(), MARGIN_LEFT + 480, y + 2);
-            }
-
-            y += 20;
-
-            // Period Checkboxes
-            const pm = noc.periodMonths;
-            drawCheckbox(MARGIN_LEFT + 40, y, '1 MONTH', pm == 1);
-            drawCheckbox(MARGIN_LEFT + 150, y, '2 MONTH', pm == 2);
-            drawCheckbox(MARGIN_LEFT + 230, y, '3 MONTH', pm == 3);
-            drawCheckbox(MARGIN_LEFT + 320, y, '6 MONTH', pm == 6);
-            y += 30;
-
-            // Disclaimer text
-            // Ensure disclaimer text doesn't break awkwardly?
-            y = checkPageBreak(y, 80);
-            doc.font('Helvetica').fontSize(9).text(
-                "I the undersigned confirm that I am the owner of the above property and / or have the legal authority to sign on behalf of the named owner(s).",
-                MARGIN_LEFT, y, { width: CONTENT_WIDTH, align: 'justify' }
-            );
-            y += 25;
-            doc.text(
-                "Should this property be subject to an offer I/we will notify the brokerage of this. This Agreement may be terminated by either party at any time upon seven (7) days written notice to the other party",
-                MARGIN_LEFT, y, { width: CONTENT_WIDTH, align: 'justify' }
-            );
-            y += 40;
-
-            // --- SIGNATURES ---
-            y = checkPageBreak(y, 80); // Ensure at least enough space for Header
-            drawText('SIGNATURES', MARGIN_LEFT, y, 'Helvetica-Bold', 12);
-            y += 20;
+            y = drawSectionTitle('OWNERS DETAILS', y);
 
             if (noc.owners && noc.owners.length > 0) {
+                noc.owners.forEach((owner: any, index: number) => {
+                    y = checkPageBreak(y, 80);
+
+                    // Owner Card Style
+                    doc.roundedRect(MARGIN, y, CONTENT_WIDTH, 70, 4).fillColor('#F9FAFB').fill(); // Light gray bg
+
+                    // Owner Name & Valid ID
+                    doc.fillColor(COLORS.PRIMARY);
+                    drawLabelValue('Owner Name', owner.name, MARGIN + 15, y + 10, 200); // Reduced y+15 to y+10
+                    drawLabelValue('Emirates ID / Passport', owner.emiratesId, MARGIN + 230, y + 10, 150);
+
+                    // Contact
+                    const phone = owner.phone ? `${owner.countryCode || ''} ${owner.phone}` : '-';
+                    drawLabelValue('Contact Number', phone, MARGIN + 15, y + 35, 200); // Reduced y+45 to y+35
+
+                    // Dates
+                    const iDate = owner.issueDate ? new Date(owner.issueDate).toLocaleDateString() : '-';
+                    const eDate = owner.expiryDate ? new Date(owner.expiryDate).toLocaleDateString() : '-';
+                    drawLabelValue('ID Issue Date', iDate, MARGIN + 230, y + 35, 100);
+                    drawLabelValue('ID Expiry Date', eDate, MARGIN + 340, y + 35, 100);
+
+                    y += 70; // Reduced margin from 85 -> 70
+                });
+            } else {
+                doc.font('Helvetica-Oblique').fontSize(10).fillColor(COLORS.SECONDARY).text('No owner details provided.', MARGIN, y);
+                y += 30;
+            }
+            y += 10;
+
+            // --- AGREEMENT TERMS ---
+            y = checkPageBreak(y, 200);
+            y = drawSectionTitle('TERMS & CONDITIONS', y);
+
+            // Row 1
+            const agreementType = (noc.agreementType || 'non-exclusive').toUpperCase();
+            drawLabelValue('Agreement Type', agreementType, MARGIN, y, 150);
+
+            const duration = noc.periodMonths ? `${noc.periodMonths} Month(s)` : '-';
+            drawLabelValue('Duration', duration, MARGIN + 160, y, 150);
+
+            const aDate = noc.agreementDate ? new Date(noc.agreementDate).toLocaleDateString() : '-';
+            drawLabelValue('Agreement Date', aDate, MARGIN + 320, y, 150);
+            y += 30;
+
+            // Disclaimer
+            doc.rect(MARGIN, y, CONTENT_WIDTH, 60).strokeColor(COLORS.BORDER).stroke();
+            doc.font('Helvetica').fontSize(8).fillColor(COLORS.SECONDARY)
+                .text("I/We confirm that I am/we are the owner(s) of the above property and have the legal authority to sign. Should this property be subject to an offer, I/we will notify the brokerage. This agreement may be terminated by either party with seven (7) days written notice.",
+                    MARGIN + 10, y + 10, { width: CONTENT_WIDTH - 20, align: 'justify', lineGap: 2 });
+            y += 75;
+
+            // --- SIGNATURES ---
+            y = checkPageBreak(y, 150);
+            y = drawSectionTitle('AUTHORIZATION & SIGNATURES', y);
+
+            if (noc.owners && noc.owners.length > 0) {
+                // Layout signatures in a grid (2 per row)
+                let xOffset = MARGIN;
+
                 for (let i = 0; i < noc.owners.length; i++) {
-                    // Check page break for EACH signature block
-                    y = checkPageBreak(y, 60);
-
                     const owner = noc.owners[i];
-                    drawText(`${i + 1}${getOrdinal(i + 1)} Owner Name:`, MARGIN_LEFT, y, 'Helvetica-Bold', 9);
 
-                    // Name
-                    doc.moveTo(MARGIN_LEFT + 100, y + 10).lineTo(MARGIN_LEFT + 220, y + 10).stroke();
-                    drawInputValues(owner.name, MARGIN_LEFT + 110, y - 2);
+                    if (y + 120 > doc.page.height - MARGIN) {
+                        doc.addPage();
+                        y = MARGIN;
+                    }
 
-                    drawText('Signature:', MARGIN_LEFT + 230, y, 'Helvetica-Bold', 9);
-                    // Signature Line
-                    doc.moveTo(MARGIN_LEFT + 280, y + 10).lineTo(MARGIN_LEFT + 400, y + 10).stroke();
+                    // Signature Box
+                    doc.rect(xOffset, y, 240, 100).strokeColor(COLORS.BORDER).stroke();
 
-                    // Signature Image
+                    // Name Header
+                    doc.font('Helvetica-Bold').fontSize(10).fillColor(COLORS.PRIMARY).text(owner.name || 'Owner', xOffset + 10, y + 10);
+
+                    // Image
                     if (owner.signatureUrl) {
                         try {
                             const response = await axios.get(owner.signatureUrl, { responseType: 'arraybuffer' });
                             const imageBuffer = Buffer.from(response.data);
-                            // Draw image slightly higher to sit on line
-                            doc.image(imageBuffer, MARGIN_LEFT + 290, y - 25, { height: 35, width: 80, fit: [80, 35] as any });
-                        } catch (e) { console.error('Sig load error', e); }
+                            // Draw image centered in box
+                            doc.image(imageBuffer, xOffset + 70, y + 30, { height: 40, width: 100, fit: [100, 40] as any });
+                        } catch (e) {
+                            console.error('Sig load error', e);
+                            doc.fontSize(8).text('(Signature Error)', xOffset + 10, y + 50);
+                        }
+                    } else {
+                        doc.fontSize(8).fillColor('#E5E7EB').text('(No Signature)', xOffset + 100, y + 50);
                     }
 
-                    drawText('Date:', MARGIN_LEFT + 410, y, 'Helvetica-Bold', 9);
-                    // Date Line
-                    doc.moveTo(MARGIN_LEFT + 440, y + 10).lineTo(PAGE_WIDTH - MARGIN_LEFT, y + 10).stroke();
-                    if (owner.signatureDate) {
-                        const sd = new Date(owner.signatureDate);
-                        drawInputValues(`${sd.getDate()}/${sd.getMonth() + 1}/${sd.getFullYear()}`, MARGIN_LEFT + 450, y - 2);
-                    }
+                    // Date
+                    const sDate = owner.signatureDate ? new Date(owner.signatureDate).toLocaleDateString() : 'Date: __________';
+                    doc.font('Helvetica').fontSize(8).fillColor(COLORS.SECONDARY).text(sDate, xOffset + 10, y + 80);
 
-                    y += 50; // Spacing for next signature
+                    // Calculations for grid
+                    if ((i + 1) % 2 === 0) {
+                        xOffset = MARGIN;
+                        y += 110;
+                    } else {
+                        xOffset = MARGIN + 260;
+                    }
                 }
             }
-
 
             doc.end();
         });

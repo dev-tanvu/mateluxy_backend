@@ -71,6 +71,14 @@ export class CreatePropertyDto {
 
     @IsOptional()
     @IsString()
+    projectStatus?: string;
+
+    @IsOptional()
+    @IsString()
+    completionDate?: string;
+
+    @IsOptional()
+    @IsString()
     parkingSpaces?: string;
 
     // Locations
@@ -132,6 +140,11 @@ export class CreatePropertyDto {
     @IsOptional()
     @IsString()
     videoUrl?: string;
+
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    mediaImages?: string[];
 
     // Additional
     @IsOptional()

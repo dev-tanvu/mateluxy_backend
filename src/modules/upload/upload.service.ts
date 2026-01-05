@@ -106,13 +106,19 @@ export class UploadService {
     }
 
     private async optimizeImage(buffer: Buffer): Promise<Buffer> {
-        return sharp(buffer)
+        const metadata = await sharp(buffer).metadata();
+
+        let pipeline = sharp(buffer)
             .resize(1920, 1080, {
                 fit: 'inside',
                 withoutEnlargement: true,
-            })
-            .jpeg({ quality: 80, mozjpeg: true }) // Compress efficiently
-            .toBuffer();
+            });
+
+        if (metadata.format === 'png') {
+            return pipeline.png({ quality: 80, compressionLevel: 9 }).toBuffer();
+        } else {
+            return pipeline.jpeg({ quality: 80, mozjpeg: true }).toBuffer();
+        }
     }
 
     /**
