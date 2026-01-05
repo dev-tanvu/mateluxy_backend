@@ -114,7 +114,7 @@ export class NocService {
         });
 
         // Register in File Manager
-        this.fileManagerService.createNocFolder(updatedNoc, pdfUrl || undefined).catch(e => {
+        this.fileManagerService.createNocFolder(updatedNoc, pdfUrl || '').catch(e => {
             this.logger.error('Failed to register NOC in file manager', e);
         });
 

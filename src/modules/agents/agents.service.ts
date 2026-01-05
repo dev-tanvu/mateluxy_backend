@@ -62,7 +62,7 @@ export class AgentsService {
         }
 
         // Create File Manager Folder
-        this.fileManagerService.createAgentFolder(createdAgent, photoUrl, vcardUrl, licenseDocumentUrl).catch(e => {
+        this.fileManagerService.createAgentFolder(createdAgent, photoUrl || '', vcardUrl || '', licenseDocumentUrl || '').catch(e => {
             this.logger.error('Failed to create agent file folder', e);
         });
 

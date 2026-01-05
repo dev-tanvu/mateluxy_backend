@@ -127,7 +127,7 @@ export class UsersService {
             });
 
             // Create File Manager Structure
-            this.fileManagerService.createUserFolder(user, avatarUrl).catch(e => {
+            this.fileManagerService.createUserFolder(user, avatarUrl || '').catch(e => {
                 console.error('Failed to create user folder in file manager', e);
             });
 

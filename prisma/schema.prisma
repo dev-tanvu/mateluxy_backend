@@ -185,6 +185,17 @@ model Agent {
   
   properties            Property[]
   leadsResponsibleFor   Lead[]
+  agentPasswords        AgentPassword[]
+}
+
+model AgentPassword {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  email     String
+  password  String   // Encrypted
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Amenity {
@@ -521,6 +532,7 @@ model Folder {
   
   // Storage tracking
   size        Int      @default(0) // Aggregated size of all files in this folder and subfolders
+  color       String?  // Folder label color
   
   // Soft delete
   isDeleted   Boolean  @default(false)
@@ -610,11 +622,16 @@ model TenancyContract {
 model Watermark {
   id          String   @id @default(cuid())
   name        String
-  imageUrl    String
-  position    String   @default("bottom-right")  // top-left, top-right, bottom-left, bottom-right, center
-  opacity     Float    @default(0.8)             // 0.0 to 1.0
-  scale       Float    @default(0.15)            // % of image width (0.1 = 10%, 0.2 = 20%)
-  isActive    Boolean  @default(false)           // Only one can be active at a time
+  type        String   @default("image")          // "image" or "text"
+  imageUrl    String?                             // Required for image watermarks, optional for text
+  text        String?                             // Text content for text watermarks
+  textColor   String?  @default("#FFFFFF")        // Color for text watermarks
+  position    String   @default("bottom-right")   // Position options
+  opacity     Float    @default(0.8)              // 0.0 to 1.0
+  scale       Float    @default(0.15)             // Scale percentage
+  rotation    Float    @default(0)                // Rotation in degrees
+  blendMode   String   @default("Normal")         // Blend mode
+  isActive    Boolean  @default(false)            // Only one can be active at a time
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

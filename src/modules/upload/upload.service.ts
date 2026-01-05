@@ -280,6 +280,72 @@ export class UploadService {
     }
 
     /**
+     * Fetch metadata (size, mimeType) for a given URL
+     */
+    async getFileMetadata(url: string): Promise<{ size: number; mimeType: string }> {
+        // Default values
+        const metadata = { size: 0, mimeType: 'application/octet-stream' };
+
+        try {
+            // Check if it's an S3 URL from our bucket
+            if (url.includes(this.bucketName) && url.includes('amazonaws.com')) {
+                const rawKey = url.split('.amazonaws.com/')[1];
+                const key = decodeURIComponent(rawKey);
+
+                if (this.s3Client && key) {
+                    try {
+                        const response = await this.s3Client.send(new HeadObjectCommand({
+                            Bucket: this.bucketName,
+                            Key: key,
+                        }));
+                        metadata.size = response.ContentLength || 0;
+                        metadata.mimeType = response.ContentType || 'application/octet-stream';
+                        return metadata;
+                    } catch (s3Error) {
+                        this.logger.warn(`S3 HeadObject failed for key "${key}" (raw: "${rawKey}"): ${s3Error.message}`);
+                    }
+                }
+            }
+
+
+            // Fallback: Try a HEAD request for external URLs
+            // Some servers require User-Agent
+            try {
+                const response = await axios.head(url, {
+                    timeout: 5000,
+                    headers: { 'User-Agent': 'Mozilla/5.0' }
+                });
+                const size = parseInt(response.headers['content-length'] || '0', 10);
+                const mimeType = response.headers['content-type'] || 'application/octet-stream';
+
+                if (!isNaN(size) && size > 0) metadata.size = size;
+                if (mimeType) metadata.mimeType = mimeType;
+            } catch (headError) {
+                // Retry with GET and Range: bytes=0-0 to just check existence/metadata if HEAD fails (some servers block HEAD)
+                try {
+                    const response = await axios.get(url, {
+                        timeout: 5000,
+                        headers: { 'User-Agent': 'Mozilla/5.0', 'Range': 'bytes=0-0' }
+                    });
+                    const size = parseInt(response.headers['content-range']?.split('/')[1] || '0', 10);
+                    // If content-range is missing, might be content-length of full file if range ignored
+                    const totalSize = size || parseInt(response.headers['content-length'] || '0', 10);
+
+                    if (!isNaN(totalSize) && totalSize > 0) metadata.size = totalSize;
+                    metadata.mimeType = response.headers['content-type'] || metadata.mimeType;
+                } catch (getError) {
+                    this.logger.warn(`Failed to fetch metadata for external URL ${url}: ${getError.message}`);
+                }
+            }
+
+            return metadata;
+        } catch (error) {
+            this.logger.warn(`Unexpected error in getFileMetadata for ${url}: ${error.message}`);
+        }
+        return metadata;
+    }
+
+    /**
      * Checks if a key already exists in the S3 bucket.
      */
     private async keyExists(key: string): Promise<boolean> {
