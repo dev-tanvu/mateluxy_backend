@@ -27,6 +27,7 @@ export class WatermarksController {
         return this.watermarksService.getActive();
     }
 
+    // Create image watermark (with file upload)
     @Post()
     @UseInterceptors(FileInterceptor('image'))
     create(
@@ -34,6 +35,12 @@ export class WatermarksController {
         @UploadedFile() file: Express.Multer.File,
     ) {
         return this.watermarksService.create(dto, file);
+    }
+
+    // Create text watermark (no file upload)
+    @Post('text')
+    createText(@Body() dto: CreateWatermarkDto) {
+        return this.watermarksService.createTextWatermark(dto);
     }
 
     @Patch(':id')

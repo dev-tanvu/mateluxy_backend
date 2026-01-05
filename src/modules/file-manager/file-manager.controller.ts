@@ -90,6 +90,11 @@ export class FileManagerController {
         return this.fileManagerService.copyFolder(id, targetParentId);
     }
 
+    @Post('folder/:id/color')
+    async updateFolderColor(@Param('id') id: string, @Body('color') color: string) {
+        return this.fileManagerService.updateFolderColor(id, color);
+    }
+
     @Post('file/:id/copy')
     async copyFile(@Param('id') id: string, @Body('targetFolderId') targetFolderId: string | null) {
         return this.fileManagerService.copyFile(id, targetFolderId);

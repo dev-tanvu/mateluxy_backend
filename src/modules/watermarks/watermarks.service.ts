@@ -24,6 +24,7 @@ export class WatermarksService {
         });
     }
 
+    // Create image watermark (with file upload)
     async create(dto: CreateWatermarkDto, file: Express.Multer.File) {
         // Upload the watermark image to S3
         const imageUrl = await this.uploadService.uploadFile(file);
@@ -35,7 +36,34 @@ export class WatermarksService {
         return this.prisma.watermark.create({
             data: {
                 name: dto.name,
+                type: 'image',
                 imageUrl,
+                position: dto.position || 'bottom-right',
+                opacity: dto.opacity || 0.8,
+                scale: dto.scale || 0.15,
+                rotation: dto.rotation || 0,
+                blendMode: dto.blendMode || 'Normal',
+            },
+        });
+    }
+
+    // Create text watermark (no file upload needed)
+    async createTextWatermark(dto: CreateWatermarkDto) {
+        if (!dto.text) {
+            throw new Error('Text is required for text watermarks');
+        }
+
+        return this.prisma.watermark.create({
+            data: {
+                name: dto.name,
+                type: 'text',
+                text: dto.text,
+                textColor: dto.textColor || '#FFFFFF',
+                position: dto.position || 'bottom-right',
+                opacity: dto.opacity || 0.8,
+                scale: dto.scale || 0.15,
+                rotation: dto.rotation || 0,
+                blendMode: dto.blendMode || 'Normal',
             },
         });
     }
@@ -75,7 +103,8 @@ export class WatermarksService {
             where: { id },
         });
 
-        if (watermark?.imageUrl) {
+        // Only delete file if it's an image watermark
+        if (watermark?.type === 'image' && watermark?.imageUrl) {
             await this.uploadService.deleteFile(watermark.imageUrl);
         }
 

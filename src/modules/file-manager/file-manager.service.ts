@@ -319,6 +319,13 @@ export class FileManagerService implements OnModuleInit {
         });
     }
 
+    async updateFolderColor(folderId: string, color: string) {
+        return this.prisma.folder.update({
+            where: { id: folderId },
+            data: { color }
+        });
+    }
+
     async renameFile(id: string, name: string) {
         return this.prisma.file.update({
             where: { id },

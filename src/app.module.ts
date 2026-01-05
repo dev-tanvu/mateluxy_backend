@@ -26,6 +26,7 @@ import { FileManagerModule } from './modules/file-manager/file-manager.module';
 import { PasswordsModule } from './modules/passwords/passwords.module';
 import { TenancyContractModule } from './modules/tenancy-contract/tenancy-contract.module';
 import { WatermarksModule } from './modules/watermarks/watermarks.module';
+import { AgentPasswordsModule } from './modules/agent-passwords/agent-passwords.module';
 
 
 @Module({
@@ -54,6 +55,7 @@ import { WatermarksModule } from './modules/watermarks/watermarks.module';
     AiModule,
     FileManagerModule,
     PasswordsModule,
+    AgentPasswordsModule,
     TenancyContractModule,
     WatermarksModule,
   ],
