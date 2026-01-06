@@ -1147,7 +1147,7 @@ export class PropertiesService {
         // Prepare listing payload according to Property Finder API requirements
         const listing: any = {
             category,
-            offeringType: purposeLower === 'rent' ? 'rent' : 'sale', // Required field per PF API
+            offeringType: purposeLower, // Use mapped purposeLower (can be 'sale', 'rent', or 'primary-sale')
             type: pfType,
             furnishingType,
             reference: property.reference || property.id,
