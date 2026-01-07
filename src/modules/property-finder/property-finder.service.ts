@@ -197,7 +197,7 @@ export class PropertyFinderService {
             const token = await this.getAccessToken();
             const url = `${this.baseUrl}/users/${pfUserId}`;
             const response = await firstValueFrom(
-                this.httpService.patch(url, { status: 'inactive' }, { // Guessing 'inactive'
+                this.httpService.patch(url, { isActive: false }, {
                     headers: { Authorization: `Bearer ${token}` },
                 })
             );
@@ -213,7 +213,7 @@ export class PropertyFinderService {
             const token = await this.getAccessToken();
             const url = `${this.baseUrl}/users/${pfUserId}`;
             const response = await firstValueFrom(
-                this.httpService.patch(url, { status: 'active' }, {
+                this.httpService.patch(url, { isActive: true }, {
                     headers: { Authorization: `Bearer ${token}` },
                 })
             );

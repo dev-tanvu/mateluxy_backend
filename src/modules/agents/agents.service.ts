@@ -216,8 +216,8 @@ export class AgentsService {
         return result;
     }
 
-    async findAll(search?: string) {
-        const where = search
+    async findAll(search?: string, isActive?: boolean) {
+        const where: any = search
             ? {
                 OR: [
                     { name: { contains: search, mode: 'insensitive' as const } },
@@ -227,6 +227,10 @@ export class AgentsService {
                 ],
             }
             : {};
+
+        if (isActive !== undefined) {
+            where.isActive = isActive;
+        }
 
         return this.prisma.agent.findMany({
             where,
@@ -456,16 +460,8 @@ export class AgentsService {
     async remove(id: string, userId?: string, ipAddress?: string, location?: string) {
         const agent = await this.findOne(id); // Check if exists
 
-        // Deactivate in Property Finder before deleting from CRM
-        if (agent.pfUserId) {
-            try {
-                await this.propertyFinderService.deactivateAgent(agent.pfUserId);
-                this.logger.log(`Agent ${agent.name} (PF ID: ${agent.pfUserId}) deactivated in Property Finder`);
-            } catch (error) {
-                this.logger.error(`Failed to deactivate agent in Property Finder: ${error.message}`);
-                // Continue with CRM deletion even if PF deactivation fails
-            }
-        }
+        // Requirement: Delete button only deletes from CRM, does not affect Property Finder
+        // Deactivation via 'deactivate' method handles PF syncing.
 
         const deleted = await this.prisma.agent.delete({ where: { id } });
 
