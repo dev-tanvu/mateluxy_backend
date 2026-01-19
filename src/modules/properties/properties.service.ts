@@ -1086,23 +1086,14 @@ export class PropertiesService {
 
         // Map Project Status for Sale properties
         // PF API projectStatus enum: "completed" | "off_plan" | "completed_primary" | "off_plan_primary"
+        // Frontend now sends these values directly, no conversion needed
         let projectStatus: string | undefined = undefined;
 
         if (purposeLower === 'sale' && property.projectStatus) {
-            // CRM values: "Resale - Ready to move", "Resale - Off-plan", "Primary - Ready to move", "Primary - Off-Plan"
-            const status = property.projectStatus;
-            const isPrimary = status.includes('Primary');
-            const isOffPlan = status.includes('Off-plan') || status.includes('Off-Plan');
-
-            if (isPrimary && isOffPlan) {
-                projectStatus = 'off_plan_primary';
-            } else if (isPrimary && !isOffPlan) {
-                projectStatus = 'completed_primary';
-            } else if (!isPrimary && isOffPlan) {
-                projectStatus = 'off_plan';
-            } else {
-                // Resale - Ready to move
-                projectStatus = 'completed';
+            // Frontend sends exact PF enum values: completed, off_plan, completed_primary, off_plan_primary
+            const validStatuses = ['completed', 'off_plan', 'completed_primary', 'off_plan_primary'];
+            if (validStatuses.includes(property.projectStatus)) {
+                projectStatus = property.projectStatus;
             }
         }
 
