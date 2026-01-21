@@ -140,7 +140,7 @@ export class UsersController {
     }
 
     @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
-    @Roles(Role.ADMIN)
+    @Roles(Role.ADMIN, Role.MODERATOR)
     @Permissions('Users')
     @Patch(':id')
     @UseInterceptors(FileInterceptor('avatar'))
