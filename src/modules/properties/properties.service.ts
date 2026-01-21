@@ -1788,7 +1788,7 @@ export class PropertiesService {
                             numberOfCheques: pfListing.price?.numberOfCheques ? String(pfListing.price.numberOfCheques) : null,
                             rentalPeriod: isRental ? (pfListing.price.period || priceType || 'Yearly') : null,
                             area: parseFloat(pfListing.size) || 0,
-                            bedrooms: parseInt(pfListing.bedrooms) || parseInt(pfListing.bedroom) || 0,
+                            bedrooms: String(parseInt(pfListing.bedrooms) || parseInt(pfListing.bedroom) || 0),
                             bathrooms: parseInt(pfListing.bathrooms) || parseInt(pfListing.bathroom) || 0,
                             unitNumber: pfListing.unitNumber ? String(pfListing.unitNumber) : (pfListing.floorNumber ? `Floor ${pfListing.floorNumber} ` : null),
                             furnishingType: pfListing.furnishingType || null,
