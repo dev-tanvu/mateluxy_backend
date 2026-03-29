@@ -95,17 +95,30 @@ export class TasksService {
         // @ts-ignore
         const tasks = await this.prisma.task.findMany({
             where,
-            select: { date: true },
+            select: { date: true, isCompleted: true },
         });
 
-        // Return unique dates using local timezone (matching findAll's setHours logic)
-        const dates = tasks.map((t: any) => {
-            const d: Date = t.date;
+        const indicators: Record<string, { allCompleted: boolean, hasIncomplete: boolean }> = {};
+
+        tasks.forEach((t: any) => {
+            const d: Date = new Date(t.date);
             const year = d.getFullYear();
             const month = String(d.getMonth() + 1).padStart(2, '0');
             const day = String(d.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
+            const key = `${year}-${month}-${day}`;
+
+            if (!indicators[key]) {
+                indicators[key] = { allCompleted: true, hasIncomplete: false };
+            }
+
+            if (t.isCompleted) {
+                // keep allCompleted true unless we find an incomplete one
+            } else {
+                indicators[key].allCompleted = false;
+                indicators[key].hasIncomplete = true;
+            }
         });
-        return [...new Set(dates)];
+
+        return indicators;
     }
 }

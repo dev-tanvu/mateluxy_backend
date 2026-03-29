@@ -25,10 +25,20 @@ export class LeadsController {
         return this.leadsService.getLeadSourceStats();
     }
 
+    @Get('status-counts')
+    getLeadStatusCounts(@GetUser() user?: any) {
+        return this.leadsService.getLeadStatusCounts(user?.id);
+    }
+
 
     @Get()
-    findAll(@GetUser() user?: any) {
-        return this.leadsService.findAll(user?.id);
+    findAll(
+        @GetUser() user?: any,
+        @Query('cursor') cursor?: string,
+        @Query('limit') limit?: string
+    ) {
+        const parsedLimit = limit ? parseInt(limit, 10) : 20;
+        return this.leadsService.findAll(user?.id, cursor, parsedLimit);
     }
 
     @Get(':id')

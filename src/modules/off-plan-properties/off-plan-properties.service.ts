@@ -304,6 +304,7 @@ export class OffPlanPropertiesService {
                 propertyType: true,
                 createdAt: true,
                 isActive: true,
+                approvalStatus: true,
                 developer: {
                     select: {
                         id: true,
@@ -500,7 +501,59 @@ export class OffPlanPropertiesService {
     async findOne(id: string) {
         const property = await this.prisma.offPlanProperty.findUnique({
             where: { id },
-            include: {
+            select: {
+                id: true,
+                developerId: true,
+                emirate: true,
+                launchType: true,
+                projectHighlight: true,
+                plotArea: true,
+                area: true,
+                bedrooms: true,
+                kitchens: true,
+                bathrooms: true,
+                isActive: true,
+                createdAt: true,
+                updatedAt: true,
+                address: true,
+                focalPoint: true,
+                focalPointImage: true,
+                latitude: true,
+                longitude: true,
+                nearbyHighlights: true,
+                style: true,
+                propertyType: true,
+                agentVideoUrl: true,
+                amenities: true,
+                amenitiesCover: true,
+                amenitiesSubtitle: true,
+                amenitiesTitle: true,
+                brochure: true,
+                brokerFee: true,
+                constructionProgress: true,
+                coverPhoto: true,
+                dldPermitNumber: true,
+                // dldQrCode intentionally excluded — large base64 blob causes timeouts
+                exteriorMedia: true,
+                floorPlans: true,
+                handoverDate: true,
+                interiorMedia: true,
+                paymentPlan: true,
+                projectDescription: true,
+                projectStage: true,
+                projectTitle: true,
+                reference: true,
+                roiPotential: true,
+                serviceCharges: true,
+                shortDescription: true,
+                startingPrice: true,
+                videoUrl: true,
+                virtualTourUrl: true,
+                areaExperts: true,
+                projectExperts: true,
+                approvalStatus: true,
+                createdByAdminId: true,
+                createdByAgentId: true,
                 developer: {
                     select: {
                         id: true,
@@ -508,6 +561,12 @@ export class OffPlanPropertiesService {
                         logoUrl: true,
                         salesManagerPhone: true,
                     },
+                },
+                createdByAgent: {
+                    select: { id: true, name: true, photoUrl: true, phone: true },
+                },
+                createdByAdmin: {
+                    select: { id: true, fullName: true, avatarUrl: true },
                 },
             },
         });
@@ -535,6 +594,21 @@ export class OffPlanPropertiesService {
                 data.developer = { connect: { id: data.developerId } };
             }
             delete data.developerId;
+        }
+
+        // Handle creator relations
+        if (data.createdByAdminId) {
+            data.createdByAdmin = {
+                connect: { id: data.createdByAdminId }
+            };
+            delete data.createdByAdminId;
+        }
+
+        if (data.createdByAgentId) {
+            data.createdByAgent = {
+                connect: { id: data.createdByAgentId }
+            };
+            delete data.createdByAgentId;
         }
 
         // Handle array fields that might be sent as null from the frontend
