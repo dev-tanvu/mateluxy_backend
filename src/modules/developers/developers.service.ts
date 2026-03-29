@@ -84,6 +84,9 @@ export class DevelopersService {
                 id: true,
                 name: true,
                 logoUrl: true,
+                _count: {
+                    select: { properties: true },
+                },
             },
             orderBy: {
                 properties: {

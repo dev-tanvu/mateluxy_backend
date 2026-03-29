@@ -61,14 +61,13 @@ export class LeadsService {
         return lead;
     }
 
-    async findAll(agentId?: string) {
+    async findAll(agentId?: string, cursor?: string, limit: number = 20) {
         const where: any = {};
         if (agentId) {
             where.responsibleAgentId = agentId;
         }
 
-        // @ts-ignore Generated Prisma client includes `lead` after `npx prisma generate`
-        return this.prisma.lead.findMany({
+        const args: any = {
             where,
             include: {
                 responsibleAgent: {
@@ -76,7 +75,28 @@ export class LeadsService {
                 },
             },
             orderBy: { createdAt: 'desc' },
-        });
+            take: limit + 1, // Fetch one extra to check if there are more
+        };
+
+        if (cursor) {
+            args.cursor = { id: cursor };
+        }
+
+        // @ts-ignore Generated Prisma client includes `lead` after `npx prisma generate`
+        const leads = await this.prisma.lead.findMany(args);
+
+        let nextCursor: string | undefined = undefined;
+        if (leads.length > limit) {
+            const nextItem = leads.pop(); // Remove the extra item
+            if (nextItem) {
+                nextCursor = nextItem.id;
+            }
+        }
+
+        return {
+            leads,
+            nextCursor,
+        };
     }
 
     async findOne(id: string) {
@@ -256,6 +276,48 @@ export class LeadsService {
             } else {
                 // Default everything else to Mateluxy/Website for now as per design
                 result.mateluxy += count;
+            }
+        });
+
+        return result;
+    }
+
+    async getLeadStatusCounts(agentId?: string) {
+        const where: any = {};
+        if (agentId) {
+            where.responsibleAgentId = agentId;
+        }
+
+        // @ts-ignore Generated Prisma client includes `lead`
+        const stats = await this.prisma.lead.groupBy({
+            by: ['status'],
+            where,
+            _count: {
+                _all: true
+            }
+        });
+
+        const result = {
+            newLeads: 0,
+            connected: 0,
+            viewing: 0,
+            closedDeals: 0,
+            total: 0
+        };
+
+        stats.forEach(group => {
+            const count = group._count._all;
+            const status = (group.status || '').toLowerCase();
+            result.total += count;
+
+            if (status === 'new') {
+                result.newLeads += count;
+            } else if (status === 'pending') {
+                result.connected += count;
+            } else if (status === 'contacting' || status === 'contacted') {
+                result.viewing += count;
+            } else if (status === 'completed' || status === 'closed') {
+                result.closedDeals += count;
             }
         });
 
