@@ -1664,11 +1664,11 @@ export class PropertiesService {
 
         try {
 
-            // Helper function to fetch all pages recursively with optional extra params
-            const fetchAllPages = async (page = 1, allResults: any[] = [], extraParams?: Record<string, any>): Promise<any[]> => {
+            // Helper function to fetch all pages recursively
+            const fetchAllPages = async (page = 1, allResults: any[] = []): Promise<any[]> => {
                 try {
-                    this.logger.log(`Fetching page ${page} from Property Finder... (params: ${JSON.stringify(extraParams || {})})`);
-                    const response = await this.pfDriver.getListings(page, 100, extraParams);
+                    this.logger.log(`Fetching page ${page} from Property Finder...`);
+                    const response = await this.pfDriver.getListings(page, 100);
 
                     const results = response.results || [];
                     const pagination = response.pagination || {};
@@ -1679,13 +1679,13 @@ export class PropertiesService {
 
                     // Check if there are more pages
                     if (pagination.totalPages && page < pagination.totalPages) {
-                        return fetchAllPages(page + 1, combined, extraParams);
+                        return fetchAllPages(page + 1, combined);
                     }
 
                     // Or fallback check: if we got full page, there might be more (if pagination meta is missing)
                     if (results.length === 100 && (!pagination.totalPages || page < 50)) {
                         // Safe guard: limit to 50 pages if no meta to prevent infinite loops
-                        return fetchAllPages(page + 1, combined, extraParams);
+                        return fetchAllPages(page + 1, combined);
                     }
 
                     return combined;
@@ -1695,24 +1695,20 @@ export class PropertiesService {
                 }
             };
 
-            // Fetch ALL listing types: published (default), drafts, and archived
-            this.logger.log('Fetching published listings...');
-            const publishedListings = await fetchAllPages(1, []);
-            this.logger.log(`Found ${publishedListings.length} published listings`);
+            // Fetch all listings from Property Finder
+            this.logger.log('Fetching listings from Property Finder...');
+            const allListings = await fetchAllPages(1, []);
+            this.logger.log(`Found ${allListings.length} listings`);
 
-            this.logger.log('Fetching draft listings...');
-            const draftListings = await fetchAllPages(1, [], { draft: true });
-            this.logger.log(`Found ${draftListings.length} draft listings`);
-
-            // Combine all listings, deduplicate by ID
+            // Deduplicate by ID
             const listingMap = new Map<string, any>();
-            [...publishedListings, ...draftListings].forEach((listing: any) => {
+            allListings.forEach((listing: any) => {
                 if (listing.id) {
                     listingMap.set(String(listing.id), listing);
                 }
             });
             const listings = Array.from(listingMap.values());
-            this.logger.log(`Total unique listings to sync: ${listings.length} (${publishedListings.length} published + ${draftListings.length} drafts, after dedup)`);
+            this.logger.log(`Total unique listings to sync: ${listings.length}`);
 
             // === OPTIMIZATION STAGE 1: Pre-fetch & In-Memory Maps ===
             this.logger.log('Optimizing sync: Pre-fetching reference data...');
