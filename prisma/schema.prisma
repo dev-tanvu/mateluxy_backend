@@ -340,6 +340,27 @@ model Notification {
   createdAt DateTime @default(now())
 }
 
+model AgentMeeting {
+  id             String   @id @default(cuid())
+  title          String
+  subtitle       String?
+  description    String?
+  meetingLink    String
+  meetingDate    DateTime
+  startTime      String
+  endTime        String?
+  priority       String   @default("NORMAL")
+  targetType     String   @default("ALL")
+  targetAgentIds String[]
+  status         String   @default("SCHEDULED")
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([meetingDate])
+  @@index([status])
+}
+
 model PfLocation {
   id        Int      @id
   name      String

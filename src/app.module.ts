@@ -31,6 +31,7 @@ import { FrooxiAuthModule } from '@frooxi-labs/authentication';
 import { UsersService } from './modules/users/users.service';
 import { PortalsModule } from './modules/portals/portals.module';
 import { TasksModule } from './modules/tasks/tasks.module';
+import { AgentMeetingsModule } from './modules/agent-meetings/agent-meetings.module';
 
 
 @Module({
@@ -76,6 +77,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
     WatermarksModule,
     PortalsModule,
     TasksModule,
+    AgentMeetingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
