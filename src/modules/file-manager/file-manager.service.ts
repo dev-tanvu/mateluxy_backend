@@ -19,9 +19,15 @@ export class FileManagerService implements OnModuleInit {
     }
 
     async createFolder(name: string, parentId?: string, isSystem: boolean = false) {
+        // Validate folder name
+        const trimmedName = (name || '').trim();
+        if (!trimmedName) throw new Error('Folder name cannot be empty');
+        if (trimmedName.length > 255) throw new Error('Folder name cannot exceed 255 characters');
+        if (/[\/\\:*?"<>|]/.test(trimmedName)) throw new Error('Folder name contains invalid characters');
+
         return this.prisma.folder.create({
             data: {
-                name,
+                name: trimmedName,
                 parentId,
                 isSystem,
             },
@@ -35,7 +41,7 @@ export class FileManagerService implements OnModuleInit {
             parentId: folderId ?? null
         };
 
-        const foldersRaw = await this.prisma.folder.findMany({
+        const folders = await this.prisma.folder.findMany({
             where: whereClause,
             orderBy: { name: 'asc' },
             include: {
@@ -48,11 +54,8 @@ export class FileManagerService implements OnModuleInit {
             }
         });
 
-        // Calculate sizes for each folder in the current view
-        const folders = await Promise.all(foldersRaw.map(async (folder) => {
-            const size = await this.getFolderSize(folder.id);
-            return { ...folder, size };
-        }));
+        // Use the cached `size` field from DB instead of recalculating recursively every time
+        // Folder sizes are synced periodically by syncFileSizes()
 
         // Get files only if folderId is provided (files can't easily be at 'root' in this UI logic,
         // or they can be. Let's assume files can be at root too).
@@ -95,6 +98,29 @@ export class FileManagerService implements OnModuleInit {
         }
 
         return totalSize;
+    }
+
+    /**
+     * Incrementally update folder size up the parent chain.
+     * Much faster than recalculating from scratch.
+     */
+    private async updateFolderSizeIncremental(folderId: string, sizeDelta: number) {
+        try {
+            let currentId: string | null = folderId;
+            while (currentId) {
+                await this.prisma.folder.update({
+                    where: { id: currentId },
+                    data: { size: { increment: sizeDelta } }
+                });
+                const folder = await this.prisma.folder.findUnique({
+                    where: { id: currentId },
+                    select: { parentId: true }
+                });
+                currentId = folder?.parentId || null;
+            }
+        } catch (e) {
+            this.logger.warn(`Failed to update folder size incrementally: ${e.message}`);
+        }
     }
 
     private async getBreadcrumbs(folderId: string): Promise<any[]> {
@@ -251,7 +277,7 @@ export class FileManagerService implements OnModuleInit {
         const url = await this.uploadService.uploadFile(file);
         if (!url) throw new Error('Failed to upload file to S3');
 
-        return this.prisma.file.create({
+        const newFile = await this.prisma.file.create({
             data: {
                 name: file.originalname,
                 url: url,
@@ -260,6 +286,13 @@ export class FileManagerService implements OnModuleInit {
                 folderId: folderId,
             }
         });
+
+        // Update parent folder size incrementally
+        if (folderId && file.size > 0) {
+            await this.updateFolderSizeIncremental(folderId, file.size);
+        }
+
+        return newFile;
     }
 
     async restoreFile(fileId: string) {
@@ -313,23 +346,37 @@ export class FileManagerService implements OnModuleInit {
     }
 
     async renameFolder(id: string, name: string) {
+        const trimmedName = (name || '').trim();
+        if (!trimmedName) throw new Error('Folder name cannot be empty');
+        if (trimmedName.length > 255) throw new Error('Folder name cannot exceed 255 characters');
+        if (/[\/\\:*?"<>|]/.test(trimmedName)) throw new Error('Folder name contains invalid characters');
+
         return this.prisma.folder.update({
             where: { id },
-            data: { name }
+            data: { name: trimmedName }
         });
     }
 
     async updateFolderColor(folderId: string, color: string) {
+        // Validate color - allow hex colors, named colors, or null to reset
+        if (color && !/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(color) && !/^[a-zA-Z]+$/.test(color)) {
+            throw new Error('Invalid color format');
+        }
+
         return this.prisma.folder.update({
             where: { id: folderId },
-            data: { color }
+            data: { color: color || null }
         });
     }
 
     async renameFile(id: string, name: string) {
+        const trimmedName = (name || '').trim();
+        if (!trimmedName) throw new Error('File name cannot be empty');
+        if (trimmedName.length > 255) throw new Error('File name cannot exceed 255 characters');
+
         return this.prisma.file.update({
             where: { id },
-            data: { name }
+            data: { name: trimmedName }
         });
     }
 
@@ -608,21 +655,42 @@ export class FileManagerService implements OnModuleInit {
 
     async permanentlyDeleteFile(fileId: string) {
         const file = await this.prisma.file.findUnique({ where: { id: fileId } });
-        if (file) {
-            // Delete from S3 only if it's an uploaded file (optional, depends on policy)
-            // await this.uploadService.deleteFile(file.url);
-            return this.prisma.file.delete({ where: { id: fileId } });
+        if (!file) {
+            this.logger.warn(`File ${fileId} not found for permanent deletion`);
+            return null;
         }
+        // Delete from S3 only if it's an uploaded file (optional, depends on policy)
+        // await this.uploadService.deleteFile(file.url);
+        return this.prisma.file.delete({ where: { id: fileId } });
     }
 
     async permanentlyDeleteFolder(folderId: string) {
-        // Recursively delete subfolders and files
-        const subfolders = await this.prisma.folder.findMany({ where: { parentId: folderId } });
-        for (const sub of subfolders) {
+        // Only recursively delete subfolders that are ALSO soft-deleted
+        // Non-deleted children should be orphaned to root (parentId = null) to avoid data loss
+        const deletedSubfolders = await this.prisma.folder.findMany({
+            where: { parentId: folderId, isDeleted: true }
+        });
+        for (const sub of deletedSubfolders) {
             await this.permanentlyDeleteFolder(sub.id);
         }
 
-        await this.prisma.file.deleteMany({ where: { folderId } });
+        // Orphan non-deleted subfolders to root instead of deleting them
+        await this.prisma.folder.updateMany({
+            where: { parentId: folderId, isDeleted: false },
+            data: { parentId: null }
+        });
+
+        // Orphan non-deleted files to root instead of deleting them
+        await this.prisma.file.updateMany({
+            where: { folderId, isDeleted: false },
+            data: { folderId: null }
+        });
+
+        // Only permanently delete soft-deleted files in this folder
+        await this.prisma.file.deleteMany({
+            where: { folderId, isDeleted: true }
+        });
+
         return this.prisma.folder.delete({ where: { id: folderId } });
     }
 
@@ -656,7 +724,9 @@ export class FileManagerService implements OnModuleInit {
                 where: { url, folderId, isDeleted: false }
             });
             if (existing) return;
-        } catch (e) { }
+        } catch (e) {
+            this.logger.warn(`Error checking existing file at ${url}: ${e.message}`);
+        }
 
         // Fetch real metadata if possible
         const metadata = await this.uploadService.getFileMetadata(url);

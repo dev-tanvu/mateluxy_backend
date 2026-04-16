@@ -63,6 +63,7 @@ export class PropertiesController {
         @Query('maxArea') maxArea?: string,
         @Query('sortBy') sortBy?: 'date' | 'price' | 'name',
         @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+        @Query('pfVerificationStatus') pfVerificationStatus?: string,
     ) {
         // Helper to extract array from query which might be key or key[]
         const getArrayParam = (key: string): string[] | undefined => {
@@ -98,6 +99,7 @@ export class PropertiesController {
             sortOrder,
             page: query.page ? Number(query.page) : undefined,
             limit: query.limit ? Number(query.limit) : undefined,
+            pfVerificationStatus,
         });
     }
 

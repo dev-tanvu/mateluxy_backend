@@ -45,9 +45,11 @@ export class PropertiesService {
         sortOrder?: 'asc' | 'desc';
         page?: number;
         limit?: number;
+        pfVerificationStatus?: string;
     }) {
         const where: any = {};
-        const { status, search, agentIds, category, purpose, location, reference, propertyTypes, permitNumber, minPrice, maxPrice, minArea, maxArea, sortBy, sortOrder, approvalStatus } = filters;
+        const andConditions: any[] = []; // Collect AND conditions to avoid OR clobbering
+        const { status, search, agentIds, category, purpose, location, reference, propertyTypes, permitNumber, minPrice, maxPrice, minArea, maxArea, sortBy, sortOrder, approvalStatus, pfVerificationStatus } = filters;
 
         // Approval Status logic
         if (approvalStatus && approvalStatus.toUpperCase() === 'ALL') {
@@ -65,30 +67,49 @@ export class PropertiesService {
             if (equalStatus === 'draft') {
                 where.isActive = false;
             } else if (equalStatus === 'unpublished') {
-                where.isActive = true;
+                // Not published on Property Finder (pfPublished = false)
                 where.pfPublished = false;
             } else if (equalStatus === 'rejected') {
-                where.isActive = true;
-                where.OR = [
-                    { pfVerificationStatus: { not: 'approved' } },
-                    { pfVerificationStatus: null }
-                ];
+                // Published on PF but not verified
+                where.pfPublished = true;
+                andConditions.push({
+                    OR: [
+                        { pfVerificationStatus: { not: 'approved' } },
+                        { pfVerificationStatus: null }
+                    ]
+                });
             } else if (equalStatus === 'published') {
-                where.isActive = true;
+                // Published on Property Finder (active on PF)
                 where.pfPublished = true;
             } else if (['SOLD', 'RENTED', 'AVAILABLE'].includes(status.toUpperCase())) {
                 where.status = status.toUpperCase();
             }
         }
 
+        // PF Verification Status filter
+        if (pfVerificationStatus) {
+            if (pfVerificationStatus === 'approved') {
+                where.pfVerificationStatus = 'approved';
+            } else if (pfVerificationStatus === 'unverified') {
+                andConditions.push({
+                    OR: [
+                        { pfVerificationStatus: { not: 'approved' } },
+                        { pfVerificationStatus: null }
+                    ]
+                });
+            }
+        }
+
         // Search filter (broad search)
         if (search) {
-            where.OR = [
-                { propertyTitle: { contains: search, mode: 'insensitive' } },
-                { reference: { contains: search, mode: 'insensitive' } },
-                { clientName: { contains: search, mode: 'insensitive' } },
-                { address: { contains: search, mode: 'insensitive' } },
-            ];
+            andConditions.push({
+                OR: [
+                    { propertyTitle: { contains: search, mode: 'insensitive' } },
+                    { reference: { contains: search, mode: 'insensitive' } },
+                    { clientName: { contains: search, mode: 'insensitive' } },
+                    { address: { contains: search, mode: 'insensitive' } },
+                ]
+            });
         }
 
         // Specific Filters
@@ -113,12 +134,13 @@ export class PropertiesService {
         }
 
         if (location) {
-            where.OR = [
-                ...(where.OR || []),
-                { address: { contains: location, mode: 'insensitive' } },
-                { emirate: { contains: location, mode: 'insensitive' } },
-                { pfLocationPath: { contains: location, mode: 'insensitive' } }
-            ];
+            andConditions.push({
+                OR: [
+                    { address: { contains: location, mode: 'insensitive' } },
+                    { emirate: { contains: location, mode: 'insensitive' } },
+                    { pfLocationPath: { contains: location, mode: 'insensitive' } }
+                ]
+            });
         }
 
         if (reference) {
@@ -180,6 +202,11 @@ export class PropertiesService {
         const page = filters.page || 1;
         const limit = filters.limit || 100;
         const skip = (page - 1) * limit;
+
+        // Combine all AND conditions into where clause
+        if (andConditions.length > 0) {
+            where.AND = andConditions;
+        }
 
         const [data, total] = await Promise.all([
             this.prisma.property.findMany({
@@ -1052,6 +1079,36 @@ export class PropertiesService {
             data: { status },
         });
 
+        // When marked as SOLD or RENTED, automatically unpublish from Property Finder
+        if ((status === 'SOLD' || status === 'RENTED') && property.pfListingId && property.pfPublished) {
+            try {
+                this.logger.log(`Property ${id} marked as ${status} — unpublishing from Property Finder (pfListingId: ${property.pfListingId})`);
+                await this.pfDriver.unpublishListing(property.pfListingId);
+                await this.prisma.property.update({
+                    where: { id },
+                    data: { pfPublished: false },
+                });
+                this.logger.log(`Successfully unpublished property ${id} from Property Finder`);
+            } catch (err) {
+                this.logger.error(`Failed to unpublish property ${id} from Property Finder`, err);
+            }
+        }
+
+        // When marked back as AVAILABLE, automatically re-publish to Property Finder
+        if (status === 'AVAILABLE' && property.pfListingId && !property.pfPublished) {
+            try {
+                this.logger.log(`Property ${id} marked as AVAILABLE — re-publishing to Property Finder (pfListingId: ${property.pfListingId})`);
+                await this.pfDriver.publishListing(property.pfListingId);
+                await this.prisma.property.update({
+                    where: { id },
+                    data: { pfPublished: true },
+                });
+                this.logger.log(`Successfully re-published property ${id} to Property Finder`);
+            } catch (err) {
+                this.logger.error(`Failed to re-publish property ${id} to Property Finder`, err);
+            }
+        }
+
         if (userId) {
             await this.activityService.create({
                 user: { connect: { id: userId } },
@@ -1603,17 +1660,15 @@ export class PropertiesService {
      * Sync listings FROM Property Finder INTO CRM
      */
     async syncFromPropertyFinder(userId?: string, ipAddress?: string, location?: string) {
-        this.logger.log('Starting sync of listings FROM Property Finder...');
+        this.logger.log('Starting sync of ALL listings FROM Property Finder...');
 
         try {
 
-            // Helper function to fetch all pages recursively
-            const fetchAllPages = async (page = 1, allResults: any[] = []): Promise<any[]> => {
+            // Helper function to fetch all pages recursively with optional extra params
+            const fetchAllPages = async (page = 1, allResults: any[] = [], extraParams?: Record<string, any>): Promise<any[]> => {
                 try {
-                    this.logger.log(`Fetching page ${page} from Property Finder...`);
-                    // pfDriver.getListings(page, perPage)
-                    // We'll use perPage = 100 for efficiency
-                    const response = await this.pfDriver.getListings(page, 100);
+                    this.logger.log(`Fetching page ${page} from Property Finder... (params: ${JSON.stringify(extraParams || {})})`);
+                    const response = await this.pfDriver.getListings(page, 100, extraParams);
 
                     const results = response.results || [];
                     const pagination = response.pagination || {};
@@ -1624,13 +1679,13 @@ export class PropertiesService {
 
                     // Check if there are more pages
                     if (pagination.totalPages && page < pagination.totalPages) {
-                        return fetchAllPages(page + 1, combined);
+                        return fetchAllPages(page + 1, combined, extraParams);
                     }
 
                     // Or fallback check: if we got full page, there might be more (if pagination meta is missing)
                     if (results.length === 100 && (!pagination.totalPages || page < 50)) {
                         // Safe guard: limit to 50 pages if no meta to prevent infinite loops
-                        return fetchAllPages(page + 1, combined);
+                        return fetchAllPages(page + 1, combined, extraParams);
                     }
 
                     return combined;
@@ -1640,8 +1695,24 @@ export class PropertiesService {
                 }
             };
 
-            const listings = await fetchAllPages(1);
-            this.logger.log(`Total listings to sync: ${listings.length}`);
+            // Fetch ALL listing types: published (default), drafts, and archived
+            this.logger.log('Fetching published listings...');
+            const publishedListings = await fetchAllPages(1, []);
+            this.logger.log(`Found ${publishedListings.length} published listings`);
+
+            this.logger.log('Fetching draft listings...');
+            const draftListings = await fetchAllPages(1, [], { draft: true });
+            this.logger.log(`Found ${draftListings.length} draft listings`);
+
+            // Combine all listings, deduplicate by ID
+            const listingMap = new Map<string, any>();
+            [...publishedListings, ...draftListings].forEach((listing: any) => {
+                if (listing.id) {
+                    listingMap.set(String(listing.id), listing);
+                }
+            });
+            const listings = Array.from(listingMap.values());
+            this.logger.log(`Total unique listings to sync: ${listings.length} (${publishedListings.length} published + ${draftListings.length} drafts, after dedup)`);
 
             // === OPTIMIZATION STAGE 1: Pre-fetch & In-Memory Maps ===
             this.logger.log('Optimizing sync: Pre-fetching reference data...');
@@ -1776,11 +1847,13 @@ export class PropertiesService {
                         // Basic Fields
                         const priceType = pfListing.price?.type?.toLowerCase() || 'sale';
                         const isRental = priceType === 'rent' || priceType === 'yearly' || priceType === 'monthly';
+                        // Determine if listing is actually live/published on Property Finder
+                        // Per PF API docs, the true publication state is in state.type/state.stage ('live' or 'draft')
+                        // Do NOT use pfListing.status as that could be verification status or other metadata
                         const isPublished =
                             pfListing.portals?.propertyfinder?.isLive === true ||
                             pfListing.state?.stage === 'live' ||
-                            pfListing.state?.type === 'live' ||
-                            ['published', 'live', 'listed'].includes(pfListing.status?.toLowerCase());
+                            pfListing.state?.type === 'live';
 
                         // Project Status
                         const offeringType = pfListing.offeringType?.toLowerCase() || pfListing.purpose?.toLowerCase() || (isRental ? 'rent' : 'sale');
